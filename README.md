@@ -33,7 +33,8 @@ $ sudo apt-get update
 $ wget https://downloads.globus.org/globus-connect-personal/linux/stable/globusconnectpersonal-latest.tgz
 $ tar xzf globusconnectpersonal-latest.tgz
 $ cd globusconnectperseonal-X.X.X # >>> USE TAB-COMPLETE TO FILL IN CORRECT VERSION NUMBER
-$ ./globusconnectpersonal  
+$ ./globusconnectpersonal
+$ ./globusconnectpersonal -start &  # the '&' starts it in terminal (non-GUI) mode. 
 # >>> You will run through a Globus Authentication and endpoint setup from here. You can name it anything you'd like!
 ```
 
