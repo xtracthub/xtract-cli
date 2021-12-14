@@ -3,6 +3,8 @@ import pathlib
 import os
 import json
 import subprocess
+from funcx.sdk.client import FuncXClient
+from globus_sdk import TransferClient
 
 class UserOptions:
   def configure_ep(self):
@@ -36,17 +38,30 @@ class UserOptions:
     self.local_metadata = None
     self.metadata_write_dir = None
 
-def is_online():
-  pass
+def is_online(ops:UserOptions):
+  res = {}
+  if ops.funcx_eid is None:
+    res['funcx_eid'] = 'Funcx not present.'
+  else:
+    fxc = FuncXClient()
+    data = fxc.run(endpoint_id=ops.funcx_eid)
+    res['funcx_eid'] = data
 
-def test_containers():
+  if ops.globus_eid is None:
+    res['globus_eid'] = 'Globus not present.'
+  else:
+    tc = TransferClient(authorizer=None)
+    endpoint = tc.get_endpoint(ops.globus_eid)
+    if endpoint is not None:
+      res['globus_eid'] = 'Globus endpoint is present.'
+  return res
+
+def test_containers(ops):
   pass
 
 '''
 Initialize.
 '''
-fn_map = {'is_online':is_online,
-          'test_containers':test_containers}
 ops = UserOptions()
 parser = argparse.ArgumentParser(prog='parser', 
                                  description='CLI tester for Xtract metadata extractors',
@@ -56,8 +71,14 @@ parser = argparse.ArgumentParser(prog='parser',
 Parse options to setup test environment. Currently only a few options are
 implemented: configure, globus_eid, funcx_eid, local_metadata, and metadata_write_dir.
 '''
-parser.add_argument('configure',
-                    action='store', type=str)
+group = parser.add_mutually_exclusive_group(required=True)
+group.add_argument('--is_online', action='store', type=str)
+group.add_argument('--test_containers', action='store', type=str)
+group.add_argument('--configure', action='store', type=str)
+
+'''
+Additional arguments for the configure argument.
+'''
 parser.add_argument("-g", "--globus_eid", 
                     action="store", dest='globus_eid', type=str)
 parser.add_argument("-f", "--funcx_eid", 
@@ -70,10 +91,20 @@ parser.add_argument("-m", "--metadata_write_dir",
 '''
 Call the configuration function after user options are loaded.
 '''
-parser.parse_known_args(namespace=ops)
-ops.configure_ep()
+args = parser.parse_args(namespace=ops)
+print('vars(ops): ' + str(vars(ops)))
+
+if args.is_online:
+  res = is_online (ops)
+  print ("is_online output: " + str(res))
+if args.configure:
+  ops.configure_ep()
+if args.test_containers:
+  print ('Call to test_containers happens here!')
+
+
+# ops.configure_ep()
 
 '''
 Quick test.
 '''
-print('vars(ops): ' + str(vars(ops)))
