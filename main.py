@@ -6,30 +6,35 @@ import subprocess
 from funcx.sdk.client import FuncXClient
 from globus_sdk import TransferClient
 
+DEBUG = False
+
 class UserOptions:
   def configure_ep(self):
-    ''' Check that an endpoint name is provided.'''
     if self.configure is None:
       print ("Cannot create Xtract Endpoint -- no endpoint name provided.")
-      return
-    ''' Import the attributes from the json file. '''
-    if os.path.isfile('~/{self.configure}/config.json'):
+      return False
+    if os.path.isfile("/Users/joaovictor/" + self.configure +  "/config.json"):
+      print ("Found config file in /Users/joaovictor/" + self.configure +  "/config.json") 
       data = None
-      with open('~/{self.configure}/config.json') as f:
+      with open("/Users/joaovictor/" + self.configure +  "/config.json") as f:
         data = json.loads(f.read())
         for key in data.keys():
+          if DEBUG: print (key, data[key])
           if hasattr (self, key):
             self.key = data[key]
+    else:
+      print ("No config file found or provided.")
     if not self.globus_eid:
       print("Cannot create Xtract Endpoint -- missing globus_eid")
-      return
+      return False
     if not self.local_metadata:
       print("Cannot create Xtract Endpoint -- missing local metadata")
-      return
+      return False
     if not self.metadata_write_dir:
       print("Cannot create Xtract Endpoint -- missing metadata write directory")
-      return
+      return False
     print ("Created Xtract Endpoint!")
+    return True
 
   def __init__(self):
     self.configure = None
@@ -92,7 +97,7 @@ parser.add_argument("-m", "--metadata_write_dir",
 Call the configuration function after user options are loaded.
 '''
 args = parser.parse_args(namespace=ops)
-print('vars(ops): ' + str(vars(ops)))
+if DEBUG: print('vars(ops): ' + str(vars(ops)))
 
 if args.is_online:
   res = is_online (ops)
@@ -101,10 +106,3 @@ if args.configure:
   ops.configure_ep()
 if args.test_containers:
   print ('Call to test_containers happens here!')
-
-
-# ops.configure_ep()
-
-'''
-Quick test.
-'''
