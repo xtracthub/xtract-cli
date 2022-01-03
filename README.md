@@ -24,6 +24,7 @@ can also be found in the Globus Documentation (CITE). If you do not already have
 
 #### 2.01 -- Install Globus Endpoint Dependencies
 ```
+$ sudo apt-get update
 $ sudo apt-get install tk tcllib
 $ sudo apt-get update 
 ```
