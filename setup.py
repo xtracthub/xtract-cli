@@ -7,13 +7,13 @@ def read_requirements():
     return requirements
 
 setuptools.setup(
-    name='xtract-cli',
+    name='xcli',
     version='0.1',
     packages=setuptools.find_packages(),
     include_package_data=True,
     install_requires=read_requirements(),
     entry_points='''
         [console_scripts]
-        xcli=xtract_cli.cli:cli
+        xcli=xcli.cli:cli
     '''
 )
