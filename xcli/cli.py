@@ -1,4 +1,5 @@
 import click
+from funcx.utils.errors import FuncXUnreachable
 import mdf_toolbox
 import os
 import json
@@ -9,6 +10,18 @@ from time import sleep
 DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
+
+def wait_for_ep(fxc, funcx_response, timeout=60, increment=2):
+    fxc_task = fxc.get_task(funcx_response)
+    time_elapsed = 0
+    while time_elapsed < timeout:
+        if fxc_task['pending'] is True:
+            sleep(increment)
+            time_elapsed += increment
+            fxc_task = fxc.get_task(funcx_response)
+        else:
+            return True
+    return False
 
 # Acquire authentication via mdf_toolbox
 auths = mdf_toolbox.login(
@@ -34,7 +47,7 @@ auths = mdf_toolbox.login(
 
 # Acquire the Globus TransferClient
 tc = auths['transfer']
-click.echo(vars(tc))
+# click.echo(vars(tc))
 
 @click.group()
 def cli():
@@ -67,19 +80,13 @@ def compute_fn(funcx_eid, func_uuid):
     fxc = FuncXClient()
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
 
-    timeout = 60
-    time_elapsed = 0
-    fxc_result = None
+    timeout=5
+    increment=1
 
-    while time_elapsed < timeout:
-        try:
-            fxc_result = fxc.get_result(funcx_response)
-        except TaskPending as error:
-            sleep(5)
-            time_elapsed += 5
-            continue
-        break
+    if not wait_for_ep(fxc, funcx_response, timeout, increment):
+        return (False, f'Error -- Funcx timed out after {timeout} seconds')
 
+    fxc_result = fxc.get_result(funcx_response)
     if fxc_result is not None and fxc_result == 'Hello World!':
         return (True, "Task complete -- result: {fxc_result}")
     elif fxc_result != 'Hello World!':
@@ -91,7 +98,7 @@ def data_fn(globus_eid, stage_dir, mdata_dir):
     except TransferAPIError as error:
         click.echo(f'Error -- Code: {error.code}, Message: {error.message}')
         return
-    
+    print(endpoint)
     if endpoint["is_globus_connect"]:
         return endpoint["gcp_connected"]
     elif endpoint["DATA"][0]["is_connected"]:
@@ -99,9 +106,20 @@ def data_fn(globus_eid, stage_dir, mdata_dir):
     else:
         return False
 
-def check_read(path):
+def check_read(path, funcx_eid):
+    fxc = FuncXClient()
+    funcx_response = fxc.run(endpoint_id=funcx_eid, function_id="42ef24ab-d5c9-4762-bad5-a193854bb2ae")
+
+    timeout=5
+    increment=1
+
+    if not wait_for_ep(fxc, funcx_response, timeout, increment):
+        return (False, f'Error -- Funcx timed out after {timeout} seconds')
+
+    print(fxc.get_result(funcx_response))
 
 def check_write(path):
+    pass
 
 # probably would be nice to inherit a context here!
 @test.command()
