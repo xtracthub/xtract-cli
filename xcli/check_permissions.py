@@ -1,13 +1,15 @@
 from funcx.sdk.client import (TaskPending, FuncXClient)
-import os
 
 def check_read(path):
+    import os
     return os.access(path, os.R_OK)
 
 def check_write(path):
+    import os
     return os.access(path, os.W_OK)
 
 def check_execute(path):
+    import os
     return os.access(path, os.X_OK)
 
 fxc = FuncXClient(timeout=60)

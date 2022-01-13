@@ -98,7 +98,7 @@ def data_fn(globus_eid, stage_dir, mdata_dir):
     except TransferAPIError as error:
         click.echo(f'Error -- Code: {error.code}, Message: {error.message}')
         return
-    print(endpoint)
+    # print(endpoint)
     if endpoint["is_globus_connect"]:
         return endpoint["gcp_connected"]
     elif endpoint["DATA"][0]["is_connected"]:
@@ -106,20 +106,29 @@ def data_fn(globus_eid, stage_dir, mdata_dir):
     else:
         return False
 
-def check_read(path, funcx_eid):
+def check_read_fn(path, funcx_eid):
     fxc = FuncXClient()
-    funcx_response = fxc.run(endpoint_id=funcx_eid, function_id="42ef24ab-d5c9-4762-bad5-a193854bb2ae")
+    funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="ab148dec-7f77-446f-81e4-934f58c3b472")
 
     timeout=5
     increment=1
 
     if not wait_for_ep(fxc, funcx_response, timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
+    # error checking here?
+    return fxc.get_result(funcx_response)
 
-    print(fxc.get_result(funcx_response))
+def check_write_fn(path, funcx_eid):
+    fxc = FuncXClient()
+    funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="c1bcf355-fb42-4ad9-9f6c-994876d693e7")
 
-def check_write(path):
-    pass
+    timeout=5
+    increment=1
+
+    if not wait_for_ep(fxc, funcx_response, timeout, increment):
+        return (False, f'Error -- Funcx timed out after {timeout} seconds')
+    # error checking here?
+    return fxc.get_result(funcx_response)
 
 # probably would be nice to inherit a context here!
 @test.command()
@@ -137,8 +146,8 @@ def compute(funcx_eid, func_uuid):
 def data(globus_eid, stage_dir, mdata_dir):
     click.echo(
         {"globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
-        "stage_dir":check_read(stage_dir),
-        "mdata_dir":check_write(mdata_dir)})
+        "stage_dir":None,
+        "mdata_dir":None})
     
 @test.command()
 @click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
@@ -150,5 +159,5 @@ def is_online(funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
     click.echo(
         {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
         "globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
-        "stage_dir":check_read(stage_dir),
-        "mdata_dir":check_write(mdata_dir)})
+        "stage_dir":check_read_fn(stage_dir, funcx_eid),
+        "mdata_dir":check_write_fn(mdata_dir, funcx_eid)})
