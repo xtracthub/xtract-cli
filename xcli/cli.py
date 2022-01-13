@@ -3,9 +3,12 @@ import mdf_toolbox
 import os
 import json
 from funcx.sdk.client import (TaskPending, FuncXClient)
+from globus_sdk import (TransferAPIError)
 from time import sleep
 
 DEBUG = False
+APP_NAME = "Xtract CLI"
+CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 
 # Acquire authentication via mdf_toolbox
 auths = mdf_toolbox.login(
@@ -22,13 +25,16 @@ auths = mdf_toolbox.login(
     make_clients=True,
     no_browser=False,
     no_local_server=False,
+    clear_old_tokens=True # learn more about Globus' oauth system and improve this.
 )
 
 # TODO: Create a timeout decorator
 # TODO: Create overarching context from CLI with funcx client initialization
+# TODO: Separate functions into modules (inward facing, outward facing)
 
 # Acquire the Globus TransferClient
 tc = auths['transfer']
+click.echo(vars(tc))
 
 @click.group()
 def cli():
@@ -48,59 +54,83 @@ def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
         'local_download': local_download,
         'mdata_write_dir': mdata_write_dir,
     }
-
     config_json = json.dumps(config)
     with open(os.path.expanduser(f'~/{ep_name}/config.json'), 'w') as f:
         f.write(config_json)
-
     click.echo('Successfully configured Xtract endpoint!')
 
 @cli.group()
 def test():
     pass
 
+def compute_fn(funcx_eid, func_uuid):
+    fxc = FuncXClient()
+    funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
+
+    timeout = 60
+    time_elapsed = 0
+    fxc_result = None
+
+    while time_elapsed < timeout:
+        try:
+            fxc_result = fxc.get_result(funcx_response)
+        except TaskPending as error:
+            sleep(5)
+            time_elapsed += 5
+            continue
+        break
+
+    if fxc_result is not None and fxc_result == 'Hello World!':
+        return (True, "Task complete -- result: {fxc_result}")
+    elif fxc_result != 'Hello World!':
+        return (False, f"Error -- Expected: \'Hello World!\', but received: \'{fxc_result}\'")
+
+def data_fn(globus_eid, stage_dir, mdata_dir):
+    try:
+        endpoint = tc.get_endpoint(globus_eid)
+    except TransferAPIError as error:
+        click.echo(f'Error -- Code: {error.code}, Message: {error.message}')
+        return
+    
+    if endpoint["is_globus_connect"]:
+        return endpoint["gcp_connected"]
+    elif endpoint["DATA"][0]["is_connected"]:
+        return True
+    else:
+        return False
+
+def check_read(path):
+
+def check_write(path):
+
 # probably would be nice to inherit a context here!
 @test.command()
 @click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
-@click.option('--func_uuid', default=None, required=False, help='Function UUID')
+@click.option('--func_uuid', default=None, required=True, help='Function UUID')
 def compute(funcx_eid, func_uuid):
-    if not funcx_eid:
-        click.echo('Error - Funcx Endpoint ID not provided.')
-        return
-    if not func_uuid:
-        click.echo('Error - Function UUID not provided.')
-        return
+    res = compute_fn(funcx_eid, func_uuid)
+    click.echo(
+        {"funcx_online":compute_fn(funcx_eid, func_uuid)[0]})
 
-    funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
-    click.echo(f'funcx_response: {funcx_response}')
-    click.echo('sleeping for 5 seconds...')
-    sleep(5)
-
-    try:
-        fxc_result = fxc.get_result(funcx_response)
-    except TaskPending as error:
-        click.echo(error)
-    click.echo(f'fxc_result: {fxc_result}')
+@test.command()
+@click.option('--globus_eid', default=None, required=True, help='Globus Endpoint ID')
+@click.option('--stage_dir', default=None, required=True)
+@click.option('--mdata_dir', default=None, required=True)
+def data(globus_eid, stage_dir, mdata_dir):
+    click.echo(
+        {"globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
+        "stage_dir":check_read(stage_dir),
+        "mdata_dir":check_write(mdata_dir)})
     
-
-    # # # A timeout functionality could be wrapped within a python
-    # # # decorator -- run this by Tyler, might be unecessary
-    # timeout = 0
-    # time_elapsed = 0
-    # while time_elapsed < timeout:
-    #     try:
-    #         fxc_result = fxc.get_result(funcx_response)
-    #     except TaskPending as error:
-    #         click.echo(f"Task incomplete -- time elapsed: {time_elapsed}")
-    #         sleep(5)
-    #         time_elapsed += 5
-    #         continue
-    #     break
-
-    # if fxc_result is not None and fxc_result == 'Hello World!':
-    #     click.echo(f"Task complete -- result: {fxc_result}")
-    #     return "OK"
-    # elif fxc_result != 'Hello World!':
-    #     click.echo(f"Error -- Expected: \'Hello World!\', but received: \'{fxc_result}\'")
-    #     return "Failure"
-
+@test.command()
+@click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
+@click.option('--func_uuid', default=None, required=True, help='Function UUID')
+@click.option('--globus_eid', default=None, required=False, help='Globus Endpoint ID')
+@click.option('--stage_dir', default=None, required=False)
+@click.option('--mdata_dir', default=None, required=False)
+def is_online(funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
+    click.echo(
+        {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
+        "globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
+        "stage_dir":check_read(stage_dir),
+        "mdata_dir":check_write(mdata_dir)})
