@@ -8,7 +8,7 @@ import mdf_toolbox
 import os
 import json
 from funcx.sdk.client import (TaskPending, FuncXClient)
-from globus_sdk import (TransferAPIError)
+from globus_sdk import (TransferAPIError, TransferData)
 from time import sleep
 import pathlib
 
@@ -201,3 +201,41 @@ def is_online(funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
         "globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
         "mdata_dir":check_write_fn(mdata_dir, funcx_eid)})
+
+
+
+# xtract-cli fetch containers --all (or –materials or –general)
+@cli.group()
+def fetch():
+    pass
+
+@fetch.command()
+@click.option('--alls', is_flag=True)
+@click.option('--materials', is_flag=True)
+@click.option('--general', is_flag=True)
+def containers(alls, materials, general):
+    source_endpoint_id = '4f99675c-ac1f-11ea-bee8-0e716405a293'
+    destination_endpoint_id = '71f9aca8-6929-11ec-b2c3-1b99bfd4976a'
+    
+    tdata = TransferData(tc, source_endpoint_id,
+        destination_endpoint_id, label="SDK example", sync_level="checksum")
+
+    all_list = ["xtract-c-code.img", "xtract-hdf.img", "xtract-images.img", "xtract-jsonxml.img",
+    "xtract-keyword.img", "xtract-matio.img", "xtract-netcdf.img", "xtract-python.img", 
+    "xtract-tabular.img", "xtract-tika.img", "xtract-xpcs.img"]
+
+    materials_list = ["xtract-hdf.img"]
+    general_list = []
+
+    chosen_list = None
+    if alls: chosen_list = alls
+    if materials: chosen_list = materials_list
+    if general: chosen_list = general_list
+
+    for filename in chosen_list:
+        source = f"/XtractContainerLibrary/{filename}"
+        destination = f"~/Desktop/{filename}"
+        tdata.add_item(source, destination, recursive=False)
+
+    transfer_result = tc.submit_transfer(tdata)
+    print(transfer_result)
