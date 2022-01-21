@@ -1,3 +1,7 @@
+from ctypes import get_errno
+from distutils.util import execute
+from importlib.resources import path
+from multiprocessing.sharedctypes import Value
 import click
 from funcx.utils.errors import FuncXUnreachable
 import mdf_toolbox
@@ -6,6 +10,7 @@ import json
 from funcx.sdk.client import (TaskPending, FuncXClient)
 from globus_sdk import (TransferAPIError)
 from time import sleep
+import pathlib
 
 DEBUG = False
 APP_NAME = "Xtract CLI"
@@ -16,6 +21,8 @@ def wait_for_ep(fxc, funcx_response, timeout=60, increment=2):
     time_elapsed = 0
     while time_elapsed < timeout:
         if fxc_task['pending'] is True:
+            click.echo("Task pending.")
+            # TODO: better task pending message.
             sleep(increment)
             time_elapsed += increment
             fxc_task = fxc.get_task(funcx_response)
@@ -36,9 +43,10 @@ auths = mdf_toolbox.login(
     ],
     app_name="Foundry",
     make_clients=True,
-    no_browser=False,
+    no_browser=True,
     no_local_server=False,
-    clear_old_tokens=True # learn more about Globus' oauth system and improve this.
+    # TODO: clear old tokens may need to be set to true initially
+    # clear_old_tokens=True # learn more about Globus' oauth system and improve this.
 )
 
 # TODO: Create a timeout decorator
@@ -80,7 +88,7 @@ def compute_fn(funcx_eid, func_uuid):
     fxc = FuncXClient()
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
 
-    timeout=5
+    timeout=10
     increment=1
 
     if not wait_for_ep(fxc, funcx_response, timeout, increment):
@@ -110,7 +118,7 @@ def check_read_fn(path, funcx_eid):
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="ab148dec-7f77-446f-81e4-934f58c3b472")
 
-    timeout=5
+    timeout=10
     increment=1
 
     if not wait_for_ep(fxc, funcx_response, timeout, increment):
@@ -122,13 +130,43 @@ def check_write_fn(path, funcx_eid):
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="c1bcf355-fb42-4ad9-9f6c-994876d693e7")
 
-    timeout=5
+    timeout=10
     increment=1
 
     if not wait_for_ep(fxc, funcx_response, timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
+
+def get_permissions(globus_eid, path):
+    pure_path = pathlib.PurePath(path)
+    path_parent = pure_path.parents[0]
+    folder = pure_path.name
+    output = {
+        "read": False, 
+        "write": False,
+        "execute": False
+        }
+    res = tc.operation_ls(globus_eid, str(path_parent))
+    array = res["DATA"]
+    for file in array:
+        if file["name"] == folder:
+            permissions = file["permissions"]
+    def octal_to_string(octal):
+        permission = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"]
+        result = []
+        for idx, value in enumerate([int(n) for n in str(octal)]):
+            if idx == 0: continue # skip the first value
+            result.append({c for c in permission[value]})
+        return result
+    user, group, others = octal_to_string(permissions)
+    if "r" in user or "r" in others:
+        output['read'] = True
+    if "w" in user or "w" in others:
+        output['write'] = True
+    if "x" in user or "x" in others:
+        output['execute'] = True
+    return output
 
 # probably would be nice to inherit a context here!
 @test.command()
@@ -144,10 +182,12 @@ def compute(funcx_eid, func_uuid):
 @click.option('--stage_dir', default=None, required=True)
 @click.option('--mdata_dir', default=None, required=True)
 def data(globus_eid, stage_dir, mdata_dir):
+    stage_dir_permissions = get_permissions(globus_eid, stage_dir)
+    mdata_dir_permissions = get_permissions(globus_eid, mdata_dir)
     click.echo(
         {"globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
-        "stage_dir":None,
-        "mdata_dir":None})
+        "stage_dir":stage_dir_permissions['read'],
+        "mdata_dir":mdata_dir_permissions['write']})
     
 @test.command()
 @click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
