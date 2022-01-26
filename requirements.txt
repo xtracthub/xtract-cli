@@ -1,2 +1,1 @@
 click==8.0.3
-globus-sdk==2.0.3

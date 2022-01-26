@@ -1,4 +1,5 @@
 from ctypes import get_errno
+from distutils.command.config import config
 from distutils.util import execute
 from importlib.resources import path
 from multiprocessing.sharedctypes import Value
@@ -16,13 +17,15 @@ DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 
+def validate_config_file():
+    pass
+
 def wait_for_ep(fxc, funcx_response, timeout=60, increment=2):
     fxc_task = fxc.get_task(funcx_response)
     time_elapsed = 0
     while time_elapsed < timeout:
         if fxc_task['pending'] is True:
-            click.echo("Task pending.")
-            # TODO: better task pending message.
+            click.echo(f"Task pending...{time_elapsed} seconds elapsed.")
             sleep(increment)
             time_elapsed += increment
             fxc_task = fxc.get_task(funcx_response)
@@ -55,7 +58,7 @@ auths = mdf_toolbox.login(
 
 # Acquire the Globus TransferClient
 tc = auths['transfer']
-# click.echo(vars(tc))
+# click.echo(vars(tc)) # Debug
 
 @click.group()
 def cli():
@@ -100,7 +103,7 @@ def compute_fn(funcx_eid, func_uuid):
     elif fxc_result != 'Hello World!':
         return (False, f"Error -- Expected: \'Hello World!\', but received: \'{fxc_result}\'")
 
-def data_fn(globus_eid, stage_dir, mdata_dir):
+def data_fn(globus_eid):
     try:
         endpoint = tc.get_endpoint(globus_eid)
     except TransferAPIError as error:
@@ -147,11 +150,15 @@ def get_permissions(globus_eid, path):
         "write": False,
         "execute": False
         }
+
     res = tc.operation_ls(globus_eid, str(path_parent))
     array = res["DATA"]
+
     for file in array:
         if file["name"] == folder:
             permissions = file["permissions"]
+            break
+    
     def octal_to_string(octal):
         permission = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"]
         result = []
@@ -159,6 +166,8 @@ def get_permissions(globus_eid, path):
             if idx == 0: continue # skip the first value
             result.append({c for c in permission[value]})
         return result
+
+    # TODO: experiment with permissions to see how it works
     user, group, others = octal_to_string(permissions)
     if "r" in user or "r" in others:
         output['read'] = True
@@ -184,8 +193,9 @@ def compute(funcx_eid, func_uuid):
 def data(globus_eid, stage_dir, mdata_dir):
     stage_dir_permissions = get_permissions(globus_eid, stage_dir)
     mdata_dir_permissions = get_permissions(globus_eid, mdata_dir)
+
     click.echo(
-        {"globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
+        {"globus_online":data_fn(globus_eid),
         "stage_dir":stage_dir_permissions['read'],
         "mdata_dir":mdata_dir_permissions['write']})
     
@@ -202,8 +212,6 @@ def is_online(funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
         "mdata_dir":check_write_fn(mdata_dir, funcx_eid)})
 
-
-
 # xtract-cli fetch containers --all (or –materials or –general)
 @cli.group()
 def fetch():
@@ -213,9 +221,43 @@ def fetch():
 @click.option('--alls', is_flag=True)
 @click.option('--materials', is_flag=True)
 @click.option('--general', is_flag=True)
-def containers(alls, materials, general):
+@click.option('--tika', is_flag=True)
+@click.option('--name', required=True)
+def containers(alls, materials, general, tika, name):
+    # TODO: check endpoint is online before going through with the transfer
+    # TODO: how do we get the endpoint name?
+    try:
+        f = open("/Users/joaovictor/test/config.json")
+    except FileNotFoundError as error:
+        click.echo("Configuration file not found.")
+        return
+
+    required = ["globus_eid", "funcx_eid", "local_download", "mdata_write_dir"]
+    config = json.loads(f.read())
+    for key in required:
+        if key not in config:
+            click.echo("required attribute not present")
+            return
+
+    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56"
+
+    # TODO: add stage_dir to config.json configuration?
+    status = {
+        "funcx_online":compute_fn(config["funcx_eid"], func_uuid)[0],
+        "globus_online":data_fn(config["globus_eid"]), #, config["local_download"], config["mdata_write_dir"]),
+        "stage_dir":check_read_fn(config["local_download"], config["funcx_eid"]),
+        "mdata_dir":check_write_fn(config["local_download"], config["funcx_eid"])
+        }
+
+    for key, value in status.items():
+        if not value:
+            click.echo(f"{key} is not properly configured. Please try again.")
+            return
+
+    click.echo("Configuration is valid.")
+
     source_endpoint_id = '4f99675c-ac1f-11ea-bee8-0e716405a293'
-    destination_endpoint_id = '71f9aca8-6929-11ec-b2c3-1b99bfd4976a'
+    destination_endpoint_id = config["globus_eid"]
     
     tdata = TransferData(tc, source_endpoint_id,
         destination_endpoint_id, label="SDK example", sync_level="checksum")
@@ -223,14 +265,20 @@ def containers(alls, materials, general):
     all_list = ["xtract-c-code.img", "xtract-hdf.img", "xtract-images.img", "xtract-jsonxml.img",
     "xtract-keyword.img", "xtract-matio.img", "xtract-netcdf.img", "xtract-python.img", 
     "xtract-tabular.img", "xtract-tika.img", "xtract-xpcs.img"]
+    tika_list = ["xtract-tika.img"]
+    materials_list = ["xtract-matio.img"]
+    general_list = [a for a in all_list if a != "xtract-matio.img"]
 
-    materials_list = ["xtract-hdf.img"]
-    general_list = []
+    if not (alls or materials or general or tika):
+        click.echo("You must provide a container to fetch. Please select one of alls, materials, general, tika.")
+        return
 
     chosen_list = None
-    if alls: chosen_list = alls
     if materials: chosen_list = materials_list
     if general: chosen_list = general_list
+    if materials and general: chosen_list = alls
+    if alls: chosen_list = alls
+    if tika: chosen_list = tika_list
 
     for filename in chosen_list:
         source = f"/XtractContainerLibrary/{filename}"
@@ -238,4 +286,4 @@ def containers(alls, materials, general):
         tdata.add_item(source, destination, recursive=False)
 
     transfer_result = tc.submit_transfer(tdata)
-    print(transfer_result)
+    click.echo(transfer_result)
