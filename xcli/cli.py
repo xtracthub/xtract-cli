@@ -20,17 +20,18 @@ CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 def validate_config_file():
     pass
 
-def wait_for_ep(fxc, funcx_response, timeout=60, increment=2):
+def wait_for_ep(fxc, funcx_response, name, timeout=60, increment=2):
     fxc_task = fxc.get_task(funcx_response)
     time_elapsed = 0
     while time_elapsed < timeout:
         if fxc_task['pending'] is True:
-            click.echo(f"Task pending...{time_elapsed} seconds elapsed.")
+            click.echo(f"{name} pending... {time_elapsed} seconds elapsed.")
             sleep(increment)
             time_elapsed += increment
             fxc_task = fxc.get_task(funcx_response)
         else:
             return True
+    click.echo(f"{name} timed out after {time_elapsed} seconds.")
     return False
 
 # Acquire authentication via mdf_toolbox
@@ -83,9 +84,10 @@ def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
     if os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
         print("Configuration already exists. Overwriting current settings.")
 
-    with open(os.path.expanduser(f'~/.xtract/{ep_name}/config.json'), 'w') as f:
+    os.makedirs(os.path.dirname(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")), exist_ok=True)
+    with open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"), "w") as f:
         f.write(config_json)
-    click.echo('Successfully configured Xtract endpoint!')
+    click.echo(f"Successfully configured {ep_name} Xtract Endpoint!")
 
 @cli.group()
 def test():
@@ -96,9 +98,9 @@ def compute_fn(funcx_eid, func_uuid):
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
 
     timeout=10
-    increment=1
+    increment=2
 
-    if not wait_for_ep(fxc, funcx_response, timeout, increment):
+    if not wait_for_ep(fxc, funcx_response, "Test compute", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
 
     fxc_result = fxc.get_result(funcx_response)
@@ -126,9 +128,9 @@ def check_read_fn(path, funcx_eid):
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="ab148dec-7f77-446f-81e4-934f58c3b472")
 
     timeout=10
-    increment=1
+    increment=2
 
-    if not wait_for_ep(fxc, funcx_response, timeout, increment):
+    if not wait_for_ep(fxc, funcx_response, "Check read permissions", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
@@ -138,9 +140,9 @@ def check_write_fn(path, funcx_eid):
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="c1bcf355-fb42-4ad9-9f6c-994876d693e7")
 
     timeout=10
-    increment=1
+    increment=2
 
-    if not wait_for_ep(fxc, funcx_response, timeout, increment):
+    if not wait_for_ep(fxc, funcx_response, "Check write permissions", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
