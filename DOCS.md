@@ -37,6 +37,8 @@ endpoint name.
 The format of the configuration function is:
 `xcli configure [OPTIONS] EP_NAME`
 
+Add .xtract/ep_name/config.json
+
 The options are as follows:
   --globus_eid TEXT       Globus Endpoint ID  [required]
   --funcx_eid TEXT        Funcx Endpoint ID  [required]

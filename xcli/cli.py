@@ -75,11 +75,15 @@ def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
         'ep_name': ep_name,
         'globus_eid': globus_eid,
         'funcx_eid': funcx_eid,
-        'local_download': local_download,
-        'mdata_write_dir': mdata_write_dir,
+        'local_download': os.path.expanduser(local_download), #expand user to make workable directories
+        'mdata_write_dir': os.path.expanduser(mdata_write_dir),
     }
     config_json = json.dumps(config)
-    with open(os.path.expanduser(f'~/{ep_name}/config.json'), 'w') as f:
+
+    if os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
+        print("Configuration already exists. Overwriting current settings.")
+
+    with open(os.path.expanduser(f'~/.xtract/{ep_name}/config.json'), 'w') as f:
         f.write(config_json)
     click.echo('Successfully configured Xtract endpoint!')
 
@@ -151,13 +155,25 @@ def get_permissions(globus_eid, path):
         "execute": False
         }
 
-    res = tc.operation_ls(globus_eid, str(path_parent))
+    # print(path)
+    # print(pure_path)
+    # print(path_parent)
+    # print(folder)
+
+    res = tc.operation_ls(endpoint_id=globus_eid, path=str(path_parent))
     array = res["DATA"]
 
+    # print(array)
+
+    permissions = None
     for file in array:
         if file["name"] == folder:
             permissions = file["permissions"]
             break
+
+    if not permissions:
+        print(f"Directory {path} not found. Please make sure it is created.")
+        return -1
     
     def octal_to_string(octal):
         permission = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"]
@@ -179,36 +195,85 @@ def get_permissions(globus_eid, path):
 
 # probably would be nice to inherit a context here!
 @test.command()
-@click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
-@click.option('--func_uuid', default=None, required=True, help='Function UUID')
-def compute(funcx_eid, func_uuid):
-    res = compute_fn(funcx_eid, func_uuid)
+@click.argument('ep_name')
+# @click.option('--funcx_eid', default=None, required=False, help='Funcx Endpoint ID')
+# @click.option('--func_uuid', default=None, required=False, help='Function UUID')
+def compute(ep_name): #, funcx_eid, func_uuid):
+    # check whether the config exists
+    if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
+        click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
+        return
+
+    f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
+    config = json.loads(f.read())
+    funcx_eid = config["funcx_eid"]
+    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
+
+    # res = compute_fn(funcx_eid, func_uuid)
     click.echo(
         {"funcx_online":compute_fn(funcx_eid, func_uuid)[0]})
 
 @test.command()
-@click.option('--globus_eid', default=None, required=True, help='Globus Endpoint ID')
-@click.option('--stage_dir', default=None, required=True)
-@click.option('--mdata_dir', default=None, required=True)
-def data(globus_eid, stage_dir, mdata_dir):
+# @click.option('--globus_eid', default=None, required=True, help='Globus Endpoint ID')
+# @click.option('--stage_dir', default=None, required=True)
+# @click.option('--mdata_dir', default=None, required=True)
+@click.argument('ep_name')
+def data(ep_name):
+    # check whether the config exists
+    if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
+        click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
+        return
+
+    f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
+    config = json.loads(f.read())
+    globus_eid = config["globus_eid"]
+    stage_dir = config["local_download"] #TODO: make sure this is right with Tyler
+    mdata_dir = config["mdata_write_dir"]
+
+    res = {
+        "globus_online":data_fn(globus_eid)
+    }
+
     stage_dir_permissions = get_permissions(globus_eid, stage_dir)
     mdata_dir_permissions = get_permissions(globus_eid, mdata_dir)
 
-    click.echo(
-        {"globus_online":data_fn(globus_eid),
-        "stage_dir":stage_dir_permissions['read'],
-        "mdata_dir":mdata_dir_permissions['write']})
+    if stage_dir_permissions == -1: 
+        res["stage_dir"] = False
+    else:
+        res["stage_dir"] = stage_dir_permissions['read']
+    
+    if mdata_dir_permissions == -1:
+        res["mdata_dir"] = False
+    else:
+        res["data_dir"] = mdata_dir_permissions['write']
+
+    click.echo(res)
     
 @test.command()
-@click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
-@click.option('--func_uuid', default=None, required=True, help='Function UUID')
-@click.option('--globus_eid', default=None, required=False, help='Globus Endpoint ID')
-@click.option('--stage_dir', default=None, required=False)
-@click.option('--mdata_dir', default=None, required=False)
-def is_online(funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
+@click.argument('ep_name')
+# @click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
+# @click.option('--func_uuid', default=None, required=True, help='Function UUID')
+# @click.option('--globus_eid', default=None, required=False, help='Globus Endpoint ID')
+# @click.option('--stage_dir', default=None, required=False)
+# @click.option('--mdata_dir', default=None, required=False)
+def is_online(ep_name): # funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
+    # check whether the config exists
+    if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
+        click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
+        return
+
+    f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
+    config = json.loads(f.read())
+
+    funcx_eid = config["funcx_eid"]
+    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
+    globus_eid = config["globus_eid"]
+    stage_dir = config["local_download"] #TODO: make sure this is right with Tyler
+    mdata_dir = config["mdata_write_dir"]
+
     click.echo(
         {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
-        "globus_online":data_fn(globus_eid, stage_dir, mdata_dir),
+        "globus_online":data_fn(globus_eid), #, stage_dir, mdata_dir),
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
         "mdata_dir":check_write_fn(mdata_dir, funcx_eid)})
 
@@ -224,9 +289,14 @@ def fetch():
 @click.option('--tika', is_flag=True)
 @click.option('--name', required=True)
 def containers(alls, materials, general, tika, name):
+    if not (alls or materials or general or tika):
+        click.echo("You must provide a container to fetch. Please select one of alls, materials, general, tika.")
+        return
+
     # TODO: check endpoint is online before going through with the transfer
     # TODO: how do we get the endpoint name?
     try:
+        # TODO: Remove hard coded lists
         f = open("/Users/joaovictor/test/config.json")
     except FileNotFoundError as error:
         click.echo("Configuration file not found.")
@@ -239,6 +309,7 @@ def containers(alls, materials, general, tika, name):
             click.echo("required attribute not present")
             return
 
+    # Hello World Function UUID
     func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56"
 
     # TODO: add stage_dir to config.json configuration?
@@ -256,6 +327,7 @@ def containers(alls, materials, general, tika, name):
 
     click.echo("Configuration is valid.")
 
+    # Containers Endpoint ID
     source_endpoint_id = '4f99675c-ac1f-11ea-bee8-0e716405a293'
     destination_endpoint_id = config["globus_eid"]
     
@@ -269,10 +341,6 @@ def containers(alls, materials, general, tika, name):
     materials_list = ["xtract-matio.img"]
     general_list = [a for a in all_list if a != "xtract-matio.img"]
 
-    if not (alls or materials or general or tika):
-        click.echo("You must provide a container to fetch. Please select one of alls, materials, general, tika.")
-        return
-
     chosen_list = None
     if materials: chosen_list = materials_list
     if general: chosen_list = general_list
@@ -282,7 +350,7 @@ def containers(alls, materials, general, tika, name):
 
     for filename in chosen_list:
         source = f"/XtractContainerLibrary/{filename}"
-        destination = f"~/Desktop/{filename}"
+        destination = f"~/.xtract/.containers/{filename}" #TODO: change this to home/.xtract/.containers/name
         tdata.add_item(source, destination, recursive=False)
 
     transfer_result = tc.submit_transfer(tdata)
