@@ -1,25 +1,17 @@
-from ctypes import get_errno
-from distutils.command.config import config
-from distutils.util import execute
-from importlib.resources import path
-from multiprocessing.sharedctypes import Value
-import click
-from funcx.utils.errors import FuncXUnreachable
-import globus_sdk
-import mdf_toolbox
-import os
-import json
+import os, pathlib, json, click, mdf_toolbox
 from funcx.sdk.client import (TaskPending, FuncXClient)
 from globus_sdk import (TransferAPIError, TransferData)
 from time import sleep
-import pathlib
+
 
 DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 
+
 def validate_config_file():
     pass
+
 
 def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
     fxc_task = fxc.get_task(funcx_response)
@@ -38,8 +30,8 @@ def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
     return False
 
 
-click.echo("Authentication in progress...", nl=False)
 # Acquire authentication via mdf_toolbox
+click.echo("Authentication in progress...", nl=False)
 auths = mdf_toolbox.login(
     services=[
         "openid",
@@ -65,11 +57,12 @@ click.echo(" complete.")
 
 # Acquire the Globus TransferClient
 tc = auths['transfer']
-# click.echo(vars(tc)) # Debug
+
 
 @click.group()
 def cli():
     pass
+
 
 @cli.command()
 @click.argument('ep_name')
@@ -95,25 +88,25 @@ def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
         f.write(config_json)
     click.echo(f"Successfully configured {ep_name} Xtract Endpoint!")
 
+
 @cli.group()
 def test():
     pass
 
+
 def compute_fn(funcx_eid, func_uuid):
     fxc = FuncXClient()
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
-
     timeout=10
     increment=1
-
     if not wait_for_fxc_ep(fxc, funcx_response, "test compute", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
-
     fxc_result = fxc.get_result(funcx_response)
     if fxc_result is not None and fxc_result == 'Hello World!':
         return (True, "Task complete -- result: {fxc_result}")
     elif fxc_result != 'Hello World!':
         return (False, f"Error -- Expected: \'Hello World!\', but received: \'{fxc_result}\'")
+
 
 def data_fn(globus_eid):
     try:
@@ -126,17 +119,16 @@ def data_fn(globus_eid):
     else:
         return endpoint["DATA"][0]["is_connected"]
 
+
 def check_read_fn(path, funcx_eid):
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="ab148dec-7f77-446f-81e4-934f58c3b472")
-
     timeout=10
     increment=1
-
     if not wait_for_fxc_ep(fxc, funcx_response, "check read permissions", timeout, increment):
         return (False, f'Error: Funcx timed out after {timeout} seconds')
-    # error checking here?
     return fxc.get_result(funcx_response)
+
 
 def check_write_fn(path, funcx_eid):
     fxc = FuncXClient()
@@ -145,10 +137,10 @@ def check_write_fn(path, funcx_eid):
     timeout=10
     increment=1
 
-    if not wait_for_fxc_ep(fxc, funcx_response, "Check write permissions", timeout, increment):
+    if not wait_for_fxc_ep(fxc, funcx_response, "check write permissions", timeout, increment):
         return (False, f'Error: Funcx timed out after {timeout} seconds')
-    # error checking here?
     return fxc.get_result(funcx_response)
+
 
 def get_permissions(globus_eid, path):
     pure_path = pathlib.PurePath(path)
@@ -185,7 +177,8 @@ def get_permissions(globus_eid, path):
             result.append({c for c in permission[value]})
         return result
 
-    # TODO: experiment with permissions to see how it works
+    # TODO: experiment with permissions to see if this
+    # strategy actually works the way we expect
     user, group, others = octal_to_string(permissions)
     if "r" in user or "r" in others:
         output['read'] = True
@@ -195,13 +188,12 @@ def get_permissions(globus_eid, path):
         output['execute'] = True
     return output
 
-# probably would be nice to inherit a context here!
+
+# probably would be nice to inherit a context here! but not really necessary
 @test.command()
 @click.argument('ep_name')
-# @click.option('--funcx_eid', default=None, required=False, help='Funcx Endpoint ID')
-# @click.option('--func_uuid', default=None, required=False, help='Function UUID')
-def compute(ep_name): #, funcx_eid, func_uuid):
-    # check whether the config exists
+def compute(ep_name):
+    # Check whether configuration `ep_name` exists
     if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
         click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
         return
@@ -211,17 +203,13 @@ def compute(ep_name): #, funcx_eid, func_uuid):
     funcx_eid = config["funcx_eid"]
     func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
 
-    # res = compute_fn(funcx_eid, func_uuid)
-    click.echo(
-        {"funcx_online":compute_fn(funcx_eid, func_uuid)[0]})
+    click.echo({"funcx_online":compute_fn(funcx_eid, func_uuid)[0]})
+
 
 @test.command()
-# @click.option('--globus_eid', default=None, required=True, help='Globus Endpoint ID')
-# @click.option('--stage_dir', default=None, required=True)
-# @click.option('--mdata_dir', default=None, required=True)
 @click.argument('ep_name')
 def data(ep_name):
-    # check whether the config exists
+    # Check whether configuration `ep_name` exists
     if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
         click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
         return
@@ -250,7 +238,8 @@ def data(ep_name):
         res["data_dir"] = mdata_dir_permissions['write']
 
     click.echo(res)
-    
+
+
 @test.command()
 @click.argument('ep_name')
 def is_online(ep_name):
@@ -265,11 +254,11 @@ def is_online(ep_name):
     funcx_eid = config["funcx_eid"]
     func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
     globus_eid = config["globus_eid"]
-    stage_dir = config["local_download"] #TODO: make sure this is right with Tyler
+    stage_dir = config["local_download"]
     mdata_dir = config["mdata_write_dir"]
 
     res = {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
-        "globus_online":data_fn(globus_eid), #, stage_dir, mdata_dir),
+        "globus_online":data_fn(globus_eid),
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
         "mdata_dir":check_write_fn(mdata_dir, funcx_eid)}
 
@@ -277,9 +266,11 @@ def is_online(ep_name):
     if not res["stage_dir"] or not res["mdata_dir"]: 
         click.echo(f"Check read or write permissions failed. Please run `xcli test data {ep_name}` for more information.")
 
+
 @cli.group()
 def fetch():
     pass
+
 
 @fetch.command()
 @click.argument('ep_name')
@@ -318,7 +309,7 @@ def containers(ep_name, alls, materials, general, tika):
             click.echo(f"Faulty set up detected. Please run `xtract is-online {ep_name}` to diagnose.")
             return
 
-    click.echo("Configuration is valid.")
+    click.echo("Configuration is valid. Proceeding with Transfer.")
 
     # Containers Endpoint ID
     source_endpoint_id = '4f99675c-ac1f-11ea-bee8-0e716405a293'
@@ -347,14 +338,34 @@ def containers(ep_name, alls, materials, general, tika):
         destination = os.path.expanduser(f"~/.xtract/.containers/{filename}")
         tdata.add_item(source, destination, recursive=False)
 
-    transfer_result = tc.submit_transfer(tdata)
-    task = tc.get_task(transfer_result["task_id"])
-    print(task)
+    response = tc.submit_transfer(tdata)
+    task_id = response["task_id"]
+    task = tc.get_task(task_id)
 
-    # elapsed_time = 0
-    # while not tc.task_wait(transfer_result["task_id"]):
-        # print(elapsed_time)
-        # sleep(1)
-        # elapsed_time += 1
-    # print(transfer_result)
-    # click.echo("Task successful!")
+    # Weird case? Just got the new task but it already exists and is complete? Could happen
+    # for very small tasks I suppose,
+    if task["completion_time"]:
+        click.echo("Task complete.")
+        transferred = task["bytes_transferred"]
+        rate = task["effective_bytes_per_second"]
+        click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
+        return
+
+    increment = 1
+    time_elapsed = 0
+    click.echo(f"Transfer pending...", nl=False)
+    while not task["completion_time"]:
+        sleep(increment)
+        click.echo(f"." * increment, nl=False)
+        time_elapsed += increment
+        task = tc.get_task(task_id)
+    click.echo(" transfer complete.")
+
+    if task["status"] != "SUCCEEDED":
+        click.echo("Task failed.")
+        return False
+
+    transferred = task["bytes_transferred"]
+    rate = task["effective_bytes_per_second"]
+    click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
+    return True
