@@ -5,6 +5,7 @@ from importlib.resources import path
 from multiprocessing.sharedctypes import Value
 import click
 from funcx.utils.errors import FuncXUnreachable
+import globus_sdk
 import mdf_toolbox
 import os
 import json
@@ -20,7 +21,7 @@ CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 def validate_config_file():
     pass
 
-def wait_for_ep(fxc, funcx_response, name, timeout=60, increment=2):
+def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
     fxc_task = fxc.get_task(funcx_response)
     time_elapsed = 0
     while time_elapsed < timeout:
@@ -73,11 +74,11 @@ def cli():
 @click.option('--mdata_write_dir', default=None, required=True, help='Metadata write directory')
 def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
     config = {
-        'ep_name': ep_name,
-        'globus_eid': globus_eid,
-        'funcx_eid': funcx_eid,
-        'local_download': os.path.expanduser(local_download), #expand user to make workable directories
-        'mdata_write_dir': os.path.expanduser(mdata_write_dir),
+        "ep_name": ep_name,
+        "globus_eid": globus_eid,
+        "funcx_eid": funcx_eid,
+        "local_download": os.path.expanduser(local_download), #expand user to make workable directories
+        "mdata_write_dir": os.path.expanduser(mdata_write_dir),
     }
     config_json = json.dumps(config)
 
@@ -100,7 +101,7 @@ def compute_fn(funcx_eid, func_uuid):
     timeout=10
     increment=2
 
-    if not wait_for_ep(fxc, funcx_response, "Test compute", timeout, increment):
+    if not wait_for_fxc_ep(fxc, funcx_response, "Test compute", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
 
     fxc_result = fxc.get_result(funcx_response)
@@ -113,15 +114,12 @@ def data_fn(globus_eid):
     try:
         endpoint = tc.get_endpoint(globus_eid)
     except TransferAPIError as error:
-        click.echo(f'Error -- Code: {error.code}, Message: {error.message}')
+        click.echo(f'Error: {error.code}, {error.message}')
         return
-    # print(endpoint)
     if endpoint["is_globus_connect"]:
         return endpoint["gcp_connected"]
-    elif endpoint["DATA"][0]["is_connected"]:
-        return True
     else:
-        return False
+        return endpoint["DATA"][0]["is_connected"]
 
 def check_read_fn(path, funcx_eid):
     fxc = FuncXClient()
@@ -130,7 +128,7 @@ def check_read_fn(path, funcx_eid):
     timeout=10
     increment=2
 
-    if not wait_for_ep(fxc, funcx_response, "Check read permissions", timeout, increment):
+    if not wait_for_fxc_ep(fxc, funcx_response, "Check read permissions", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
@@ -142,7 +140,7 @@ def check_write_fn(path, funcx_eid):
     timeout=10
     increment=2
 
-    if not wait_for_ep(fxc, funcx_response, "Check write permissions", timeout, increment):
+    if not wait_for_fxc_ep(fxc, funcx_response, "Check write permissions", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
@@ -157,15 +155,12 @@ def get_permissions(globus_eid, path):
         "execute": False
         }
 
-    # print(path)
-    # print(pure_path)
-    # print(path_parent)
-    # print(folder)
-
-    res = tc.operation_ls(endpoint_id=globus_eid, path=str(path_parent))
-    array = res["DATA"]
-
-    # print(array)
+    try: 
+        res = tc.operation_ls(endpoint_id=globus_eid, path=str(path_parent))
+        array = res["DATA"]
+    except Exception as e:
+        click.echo(f'Error: {e.code}, {e.message}')
+        return -1
 
     permissions = None
     for file in array:
@@ -174,7 +169,7 @@ def get_permissions(globus_eid, path):
             break
 
     if not permissions:
-        print(f"Directory {path} not found. Please make sure it is created.")
+        print(f"Directory {path} not found. Please run 'mkdir {path}' on the Globus Endpoint.")
         return -1
     
     def octal_to_string(octal):
@@ -253,13 +248,8 @@ def data(ep_name):
     
 @test.command()
 @click.argument('ep_name')
-# @click.option('--funcx_eid', default=None, required=True, help='Funcx Endpoint ID')
-# @click.option('--func_uuid', default=None, required=True, help='Function UUID')
-# @click.option('--globus_eid', default=None, required=False, help='Globus Endpoint ID')
-# @click.option('--stage_dir', default=None, required=False)
-# @click.option('--mdata_dir', default=None, required=False)
-def is_online(ep_name): # funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir):
-    # check whether the config exists
+def is_online(ep_name):
+    # Check whether configuration `ep_name` exists
     if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
         click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
         return
@@ -273,13 +263,15 @@ def is_online(ep_name): # funcx_eid, func_uuid, globus_eid, stage_dir, mdata_dir
     stage_dir = config["local_download"] #TODO: make sure this is right with Tyler
     mdata_dir = config["mdata_write_dir"]
 
-    click.echo(
-        {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
+    res = {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
         "globus_online":data_fn(globus_eid), #, stage_dir, mdata_dir),
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
-        "mdata_dir":check_write_fn(mdata_dir, funcx_eid)})
+        "mdata_dir":check_write_fn(mdata_dir, funcx_eid)}
 
-# xtract-cli fetch containers --all (or –materials or –general)
+    click.echo(res)
+    if not res["stage_dir"] or not res["mdata_dir"]: 
+        click.echo(f"Check read or write permissions failed. Please run `xcli test data {ep_name}` for more information.")
+
 @cli.group()
 def fetch():
     pass
@@ -289,42 +281,36 @@ def fetch():
 @click.option('--materials', is_flag=True)
 @click.option('--general', is_flag=True)
 @click.option('--tika', is_flag=True)
-@click.option('--name', required=True)
-def containers(alls, materials, general, tika, name):
+@click.option('--ep_name', required=True)
+def containers(alls, materials, general, tika, ep_name):
     if not (alls or materials or general or tika):
         click.echo("You must provide a container to fetch. Please select one of alls, materials, general, tika.")
         return
 
-    # TODO: check endpoint is online before going through with the transfer
-    # TODO: how do we get the endpoint name?
-    try:
-        # TODO: Remove hard coded lists
-        f = open("/Users/joaovictor/test/config.json")
-    except FileNotFoundError as error:
-        click.echo("Configuration file not found.")
+    if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
+        click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
         return
-
-    required = ["globus_eid", "funcx_eid", "local_download", "mdata_write_dir"]
+    f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
+
+    # Hello World Function UUID
+    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56"
+    required = ["globus_eid", "funcx_eid", "local_download", "mdata_write_dir"]
     for key in required:
         if key not in config:
             click.echo("required attribute not present")
             return
 
-    # Hello World Function UUID
-    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56"
+    click.echo("Testing Xtract configuration.")
 
-    # TODO: add stage_dir to config.json configuration?
     status = {
         "funcx_online":compute_fn(config["funcx_eid"], func_uuid)[0],
-        "globus_online":data_fn(config["globus_eid"]), #, config["local_download"], config["mdata_write_dir"]),
+        "globus_online":data_fn(config["globus_eid"]),
         "stage_dir":check_read_fn(config["local_download"], config["funcx_eid"]),
-        "mdata_dir":check_write_fn(config["local_download"], config["funcx_eid"])
-        }
-
+        "mdata_dir":check_write_fn(config["local_download"], config["funcx_eid"])}
     for key, value in status.items():
         if not value:
-            click.echo(f"{key} is not properly configured. Please try again.")
+            click.echo(f"Faulty set up detected. Please run `xtract is-online {ep_name}` to diagnose.")
             return
 
     click.echo("Configuration is valid.")
@@ -332,7 +318,7 @@ def containers(alls, materials, general, tika, name):
     # Containers Endpoint ID
     source_endpoint_id = '4f99675c-ac1f-11ea-bee8-0e716405a293'
     destination_endpoint_id = config["globus_eid"]
-    
+
     tdata = TransferData(tc, source_endpoint_id,
         destination_endpoint_id, label="SDK example", sync_level="checksum")
 
@@ -352,8 +338,18 @@ def containers(alls, materials, general, tika, name):
 
     for filename in chosen_list:
         source = f"/XtractContainerLibrary/{filename}"
-        destination = f"~/.xtract/.containers/{filename}" #TODO: change this to home/.xtract/.containers/name
+        os.makedirs(os.path.dirname(os.path.expanduser(f"~/.xtract/.containers/")), exist_ok=True)
+        destination = os.path.expanduser(f"~/.xtract/.containers/{filename}")
         tdata.add_item(source, destination, recursive=False)
 
     transfer_result = tc.submit_transfer(tdata)
-    click.echo(transfer_result)
+    task = tc.get_task(transfer_result["task_id"])
+    print(task)
+
+    # elapsed_time = 0
+    # while not tc.task_wait(transfer_result["task_id"]):
+        # print(elapsed_time)
+        # sleep(1)
+        # elapsed_time += 1
+    # print(transfer_result)
+    # click.echo("Task successful!")
