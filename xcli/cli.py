@@ -328,8 +328,8 @@ def containers(ep_name, alls, materials, general, tika):
     chosen_list = None
     if materials: chosen_list = materials_list
     if general: chosen_list = general_list
-    if materials and general: chosen_list = alls
-    if alls: chosen_list = alls
+    if materials and general: chosen_list = all_list
+    if alls: chosen_list = all_list
     if tika: chosen_list = tika_list
 
     for filename in chosen_list:
@@ -352,13 +352,30 @@ def containers(ep_name, alls, materials, general, tika):
         return
 
     increment = 1
-    time_elapsed = 0
-    click.echo(f"Transfer pending...", nl=False)
-    while not task["completion_time"]:
+
+
+    click.echo("Task pending...", nl=False)
+    while task["files"] == 0:
         sleep(increment)
         click.echo(f"." * increment, nl=False)
-        time_elapsed += increment
         task = tc.get_task(task_id)
+        
+    total = task["files"]
+    succeeded = task["files_transferred"] 
+
+    click.echo()
+    click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
+    while not task["completion_time"]:
+        if succeeded < task["files_transferred"]:
+            total = task["files"]
+            succeeded = task["files_transferred"] 
+            click.echo()
+            click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
+        sleep(increment)
+        click.echo(f"." * increment, nl=False)
+        task = tc.get_task(task_id)
+        total = task["files"]
+        succeeded = task["files_transferred"] 
     click.echo(" transfer complete.")
 
     if task["status"] != "SUCCEEDED":
