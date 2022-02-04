@@ -133,7 +133,7 @@ def check_read_fn(path, funcx_eid):
     timeout=10
     increment=1
 
-    if not wait_for_fxc_ep(fxc, funcx_response, "Check read permissions", timeout, increment):
+    if not wait_for_fxc_ep(fxc, funcx_response, "check read permissions", timeout, increment):
         return (False, f'Error: Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
@@ -146,7 +146,7 @@ def check_write_fn(path, funcx_eid):
     increment=1
 
     if not wait_for_fxc_ep(fxc, funcx_response, "Check write permissions", timeout, increment):
-        return (False, f'Error -- Funcx timed out after {timeout} seconds')
+        return (False, f'Error: Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
 
