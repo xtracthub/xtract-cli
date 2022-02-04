@@ -24,17 +24,21 @@ def validate_config_file():
 def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
     fxc_task = fxc.get_task(funcx_response)
     time_elapsed = 0
+    click.echo(f"'{name}' pending...", nl=False)
     while time_elapsed < timeout:
         if fxc_task['pending'] is True:
-            click.echo(f"{name} pending... {time_elapsed} seconds elapsed.")
             sleep(increment)
+            click.echo(f"." * increment, nl=False)
             time_elapsed += increment
             fxc_task = fxc.get_task(funcx_response)
         else:
+            click.echo(" complete.")
             return True
-    click.echo(f"{name} timed out after {time_elapsed} seconds.")
+    click.echo(f" '{name}' timed out after {time_elapsed} seconds.")
     return False
 
+
+click.echo("Authentication in progress...", nl=False)
 # Acquire authentication via mdf_toolbox
 auths = mdf_toolbox.login(
     services=[
@@ -53,6 +57,7 @@ auths = mdf_toolbox.login(
     # TODO: clear old tokens may need to be set to true initially
     # clear_old_tokens=True # learn more about Globus' oauth system and improve this.
 )
+click.echo(" complete.")
 
 # TODO: Create a timeout decorator
 # TODO: Create overarching context from CLI with funcx client initialization
@@ -99,9 +104,9 @@ def compute_fn(funcx_eid, func_uuid):
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
 
     timeout=10
-    increment=2
+    increment=1
 
-    if not wait_for_fxc_ep(fxc, funcx_response, "Test compute", timeout, increment):
+    if not wait_for_fxc_ep(fxc, funcx_response, "test compute", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
 
     fxc_result = fxc.get_result(funcx_response)
@@ -126,10 +131,10 @@ def check_read_fn(path, funcx_eid):
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="ab148dec-7f77-446f-81e4-934f58c3b472")
 
     timeout=10
-    increment=2
+    increment=1
 
     if not wait_for_fxc_ep(fxc, funcx_response, "Check read permissions", timeout, increment):
-        return (False, f'Error -- Funcx timed out after {timeout} seconds')
+        return (False, f'Error: Funcx timed out after {timeout} seconds')
     # error checking here?
     return fxc.get_result(funcx_response)
 
@@ -138,7 +143,7 @@ def check_write_fn(path, funcx_eid):
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="c1bcf355-fb42-4ad9-9f6c-994876d693e7")
 
     timeout=10
-    increment=2
+    increment=1
 
     if not wait_for_fxc_ep(fxc, funcx_response, "Check write permissions", timeout, increment):
         return (False, f'Error -- Funcx timed out after {timeout} seconds')
@@ -277,12 +282,12 @@ def fetch():
     pass
 
 @fetch.command()
+@click.argument('ep_name')
 @click.option('--alls', is_flag=True)
 @click.option('--materials', is_flag=True)
 @click.option('--general', is_flag=True)
 @click.option('--tika', is_flag=True)
-@click.option('--ep_name', required=True)
-def containers(alls, materials, general, tika, ep_name):
+def containers(ep_name, alls, materials, general, tika):
     if not (alls or materials or general or tika):
         click.echo("You must provide a container to fetch. Please select one of alls, materials, general, tika.")
         return
