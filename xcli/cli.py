@@ -321,7 +321,7 @@ def containers(ep_name, alls, materials, general, tika):
     all_list = ["xtract-c-code.img", "xtract-hdf.img", "xtract-images.img", "xtract-jsonxml.img",
     "xtract-keyword.img", "xtract-matio.img", "xtract-netcdf.img", "xtract-python.img", 
     "xtract-tabular.img", "xtract-tika.img", "xtract-xpcs.img"]
-    tika_list = ["xtract-tika.img"]
+    tika_list = ["xtract-tika.img",]
     materials_list = ["xtract-matio.img"]
     general_list = [a for a in all_list if a != "xtract-matio.img"]
 
