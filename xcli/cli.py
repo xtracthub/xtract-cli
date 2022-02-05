@@ -201,7 +201,7 @@ def compute(ep_name):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
     funcx_eid = config["funcx_eid"]
-    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
+    func_uuid = "a245e6ec-3278-4c21-9a4e-2aa26ad44fa4" # Hello World Function UUID
 
     click.echo({"funcx_online":compute_fn(funcx_eid, func_uuid)[0]})
 
