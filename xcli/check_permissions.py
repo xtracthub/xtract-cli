@@ -13,9 +13,9 @@ def check_execute(path):
     return os.access(path, os.X_OK)
 
 fxc = FuncXClient(timeout=60)
-check_read_uuid = fxc.register_function(check_read)
-check_write_uuid = fxc.register_function(check_write)
-check_execute_uuid = fxc.register_function(check_execute)
+check_read_uuid = fxc.register_function(check_read, public=True)
+check_write_uuid = fxc.register_function(check_write, public=True)
+check_execute_uuid = fxc.register_function(check_execute, public=True)
 
 print(f'check_read_uuid: {check_read_uuid}')
 print(f'check_write_uuid: {check_write_uuid}')

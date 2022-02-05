@@ -122,7 +122,7 @@ def data_fn(globus_eid):
 
 def check_read_fn(path, funcx_eid):
     fxc = FuncXClient()
-    funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="ab148dec-7f77-446f-81e4-934f58c3b472")
+    funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="80b17dc9-e0bd-439c-9bd4-741a1b6839f0")
     timeout=10
     increment=1
     if not wait_for_fxc_ep(fxc, funcx_response, "check read permissions", timeout, increment):
@@ -132,7 +132,7 @@ def check_read_fn(path, funcx_eid):
 
 def check_write_fn(path, funcx_eid):
     fxc = FuncXClient()
-    funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="c1bcf355-fb42-4ad9-9f6c-994876d693e7")
+    funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="18e44258-1356-4f35-9713-aa3de2b2abaa")
 
     timeout=10
     increment=1
