@@ -46,12 +46,9 @@ auths = mdf_toolbox.login(
     make_clients=True,
     no_browser=True,
     no_local_server=False,
-    # TODO: clear old tokens may need to be set to true initially
-    # clear_old_tokens=True # learn more about Globus' oauth system and improve this.
 )
 click.echo(" complete.")
 
-# TODO: Create a timeout decorator
 # TODO: Create overarching context from CLI with funcx client initialization
 # TODO: Separate functions into modules (inward facing, outward facing)
 
@@ -204,7 +201,6 @@ def compute(ep_name):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
     funcx_eid = config["funcx_eid"]
-    # func_uuid = "a245e6ec-3278-4c21-9a4e-2aa26ad44fa4" # Hello World Function UUID
 
     click.echo({"funcx_online": compute_fn(funcx_eid)[0]})
 
@@ -245,7 +241,7 @@ def data(ep_name):
 
 @test.command()
 @click.argument('ep_name')
-def is_online(ep_name):
+def all(ep_name):
     # Check whether configuration `ep_name` exists
     if not os.path.exists(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")):
         click.echo(f"Endpoint {ep_name} does not exist! Run `xcli configure` first.")
@@ -255,7 +251,6 @@ def is_online(ep_name):
     config = json.loads(f.read())
 
     funcx_eid = config["funcx_eid"]
-    # func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
     globus_eid = config["globus_eid"]
     stage_dir = config["local_download"]
     mdata_dir = config["mdata_write_dir"]
@@ -345,8 +340,8 @@ def containers(ep_name, alls, materials, general, tika):
     task_id = response["task_id"]
     task = tc.get_task(task_id)
 
-    # Weird case? Just got the new task but it already exists and is complete? Could happen
-    # for very small tasks I suppose,
+    # Edge case --  just got the new task but it already exists and is complete.
+    # Could happen for very small tasks.
     if task["completion_time"]:
         click.echo("Task complete.")
         transferred = task["bytes_transferred"]
@@ -355,7 +350,6 @@ def containers(ep_name, alls, materials, general, tika):
         return
 
     increment = 1
-
 
     click.echo("Task pending...", nl=False)
     while task["files"] == 0:
@@ -377,6 +371,7 @@ def containers(ep_name, alls, materials, general, tika):
         sleep(increment)
         click.echo(f"." * increment, nl=False)
         task = tc.get_task(task_id)
+        print(task)
         total = task["files"]
         succeeded = task["files_transferred"] 
     click.echo(" transfer complete.")
