@@ -94,8 +94,11 @@ def test():
     pass
 
 
-def compute_fn(funcx_eid, func_uuid):
+def compute_fn(funcx_eid):
     fxc = FuncXClient()
+    def hello_world():
+        return 'Hello World!'
+    func_uuid = fxc.register_function(hello_world)
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
     timeout=10
     increment=1
@@ -201,9 +204,9 @@ def compute(ep_name):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
     funcx_eid = config["funcx_eid"]
-    func_uuid = "a245e6ec-3278-4c21-9a4e-2aa26ad44fa4" # Hello World Function UUID
+    # func_uuid = "a245e6ec-3278-4c21-9a4e-2aa26ad44fa4" # Hello World Function UUID
 
-    click.echo({"funcx_online":compute_fn(funcx_eid, func_uuid)[0]})
+    click.echo({"funcx_online": compute_fn(funcx_eid)[0]})
 
 
 @test.command()
@@ -252,12 +255,12 @@ def is_online(ep_name):
     config = json.loads(f.read())
 
     funcx_eid = config["funcx_eid"]
-    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
+    # func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56" # Hello World Function UUID
     globus_eid = config["globus_eid"]
     stage_dir = config["local_download"]
     mdata_dir = config["mdata_write_dir"]
 
-    res = {"funcx_online":compute_fn(funcx_eid, func_uuid)[0],
+    res = {"funcx_online":compute_fn(funcx_eid)[0],
         "globus_online":data_fn(globus_eid),
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
         "mdata_dir":check_write_fn(mdata_dir, funcx_eid)}
@@ -300,7 +303,7 @@ def containers(ep_name, alls, materials, general, tika):
     click.echo("Testing Xtract configuration.")
 
     status = {
-        "funcx_online":compute_fn(config["funcx_eid"], func_uuid)[0],
+        "funcx_online":compute_fn(config["funcx_eid"])[0],
         "globus_online":data_fn(config["globus_eid"]),
         "stage_dir":check_read_fn(config["local_download"], config["funcx_eid"]),
         "mdata_dir":check_write_fn(config["local_download"], config["funcx_eid"])}
