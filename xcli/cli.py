@@ -4,11 +4,12 @@ from globus_sdk import (TransferAPIError, TransferData)
 from time import sleep
 
 
+# DEBUG
 DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 
-
+# UUID
 HELLO_WORLD_UUID = "91e5a8db-e7b3-4d28-a3ea-81f44d1d75bf"
 HELLO_WORLD_EXPECTED = "Hello World!"
 CHECK_READ_UUID = "80b17dc9-e0bd-439c-9bd4-741a1b6839f0"
