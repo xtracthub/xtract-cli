@@ -9,8 +9,12 @@ APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 
 
-def validate_config_file():
-    pass
+HELLO_WORLD_UUID = "91e5a8db-e7b3-4d28-a3ea-81f44d1d75bf"
+HELLO_WORLD_EXPECTED = "Hello World!"
+CHECK_READ_UUID = "80b17dc9-e0bd-439c-9bd4-741a1b6839f0"
+CHECK_WRITE_UUID = "18e44258-1356-4f35-9713-aa3de2b2abaa"
+CHECK_EXEC_UUID = "22513088-840a-426e-83f4-fd4a70c7199c"
+PETREL_XTRACT_EID = "4f99675c-ac1f-11ea-bee8-0e716405a293"
 
 
 def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
@@ -68,6 +72,17 @@ def cli():
 @click.option('--local_download', default=None, required=True, help='Local download')
 @click.option('--mdata_write_dir', default=None, required=True, help='Metadata write directory')
 def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
+    """Configures Xtract instance by storing endpoing IDs and directories to
+    save files to on the current machine. The configuration file is stored as
+    a json file in the directory '~/.xtract/{ep_name}/config.json'.
+
+    Args:
+        ep_name (str): endpoint configuration name
+        globus_eid (str): Globus Endpoint ID (for data transfers)
+        funcx_eid (str): Funcx Endpoint ID (for computing)
+        local_download (str): directory where downloads are stored
+        mdata_write_dir (str): directory metadata gets written to
+    """
     config = {
         "ep_name": ep_name,
         "globus_eid": globus_eid,
@@ -88,10 +103,23 @@ def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
 
 @cli.group()
 def test():
+    """Create a click group to organize 'test' commands. These are associated
+    with the Funcx Endpoint.
+    """
     pass
 
 
 def compute_fn(funcx_eid):
+    """Test whether a Funcx endpoint with Endpoint ID `funcx_eid` is online.
+
+    Args:
+        funcx_eid (str): Funcx Endpoint ID (for computing).
+
+    Returns:
+        (bool, str): The boolean in the tuple is True if the Funcx endpoint is
+        online, otherwise False. The string contains simple debugging
+        information.
+    """
     fxc = FuncXClient()
     def hello_world():
         return 'Hello World!'
@@ -109,6 +137,14 @@ def compute_fn(funcx_eid):
 
 
 def data_fn(globus_eid):
+    """Test whether a Globus endpoint with Endpoint ID `globus_eid` is online.
+
+    Args:
+        globus_eid (_type_): Endpoint ID associated with a Globus endpoint.
+
+    Returns:
+        bool: True if Globus endpoint is online, False otherwise.
+    """
     try:
         endpoint = tc.get_endpoint(globus_eid)
     except TransferAPIError as error:
@@ -121,6 +157,16 @@ def data_fn(globus_eid):
 
 
 def check_read_fn(path, funcx_eid):
+    """Check read permissions at `path` on a Funcx endpoint.
+
+    Args:
+        path (str): relative path to be checked on endpoint.
+        funcx_eid (str): endpoint ID associated with a Funcx endpoint
+
+    Returns:
+        (bool, str): True if successful, False otherwise. Debugging message is
+        contained in the string.
+    """
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="80b17dc9-e0bd-439c-9bd4-741a1b6839f0")
     timeout=10
@@ -131,6 +177,16 @@ def check_read_fn(path, funcx_eid):
 
 
 def check_write_fn(path, funcx_eid):
+    """Check write permissions at `path` on a Funcx endpoint.
+
+    Args:
+        path (str): relative path to be checked on endpoint.
+        funcx_eid (str): endpoint ID associated with a Funcx endpoint
+
+    Returns:
+        (bool, str): True if successful, False otherwise. Debugging message is
+        contained in the string.
+    """
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="18e44258-1356-4f35-9713-aa3de2b2abaa")
 
@@ -277,6 +333,19 @@ def fetch():
 @click.option('--general', is_flag=True)
 @click.option('--tika', is_flag=True)
 def containers(ep_name, alls, materials, general, tika):
+    """Fetch containers from Globus endpoint and store on Funcx endpoint.
+    Endpoint IDs are fetched from the configuration file.
+
+    Args:
+        ep_name (str): Endpoint to receive fetched containers
+        alls (bool): True if all containers to be fetched.
+        materials (bool): True if material containers to be fetched.
+        general (bool): True if general containers to be fetched.
+        tika (bool): True if tika containers to be fetched.
+
+    Returns:
+        bool: True if task succesful, False otherwise.
+    """
     if not (alls or materials or general or tika):
         click.echo("You must provide a container to fetch. Please select one of alls, materials, general, tika.")
         return
