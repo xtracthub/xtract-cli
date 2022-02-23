@@ -4,11 +4,13 @@ from globus_sdk import (TransferAPIError, TransferData)
 from time import sleep
 
 
+# DEBUG
 DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
 
 
+# UUID
 HELLO_WORLD_UUID = "91e5a8db-e7b3-4d28-a3ea-81f44d1d75bf"
 HELLO_WORLD_EXPECTED = "Hello World!"
 CHECK_READ_UUID = "80b17dc9-e0bd-439c-9bd4-741a1b6839f0"
@@ -87,7 +89,7 @@ def configure(ep_name, globus_eid, funcx_eid, local_download, mdata_write_dir):
         "ep_name": ep_name,
         "globus_eid": globus_eid,
         "funcx_eid": funcx_eid,
-        "local_download": os.path.expanduser(local_download), #expand user to make workable directories
+        "local_download": os.path.expanduser(local_download),
         "mdata_write_dir": os.path.expanduser(mdata_write_dir),
     }
     config_json = json.dumps(config)
@@ -109,7 +111,7 @@ def test():
     pass
 
 
-def compute_fn(funcx_eid):
+def compute_fn(funcx_eid, func_uuid, expected, timeout=10, increment=1):
     """Test whether a Funcx endpoint with Endpoint ID `funcx_eid` is online.
 
     Args:
@@ -121,26 +123,22 @@ def compute_fn(funcx_eid):
         information.
     """
     fxc = FuncXClient()
-    def hello_world():
-        return 'Hello World!'
-    func_uuid = fxc.register_function(hello_world)
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
-    timeout=10
-    increment=1
+
     if not wait_for_fxc_ep(fxc, funcx_response, "test compute", timeout, increment):
-        return (False, f'Error -- Funcx timed out after {timeout} seconds')
+        return (False, f'Funcx timed out after {timeout} seconds')
     fxc_result = fxc.get_result(funcx_response)
-    if fxc_result is not None and fxc_result == 'Hello World!':
-        return (True, "Task complete -- result: {fxc_result}")
-    elif fxc_result != 'Hello World!':
-        return (False, f"Error -- Expected: \'Hello World!\', but received: \'{fxc_result}\'")
+    if fxc_result is not None and fxc_result == expected:
+        return (True, f"Task returned correct result.")
+    elif fxc_result != expected:
+        return (False, f"Task returned incorrect result. Expected: \'{expected}\', but received: \'{fxc_result}\'")
 
 
 def data_fn(globus_eid):
     """Test whether a Globus endpoint with Endpoint ID `globus_eid` is online.
 
     Args:
-        globus_eid (_type_): Endpoint ID associated with a Globus endpoint.
+        globus_eid (str): Endpoint ID associated with a Globus endpoint.
 
     Returns:
         bool: True if Globus endpoint is online, False otherwise.
@@ -148,8 +146,13 @@ def data_fn(globus_eid):
     try:
         endpoint = tc.get_endpoint(globus_eid)
     except TransferAPIError as error:
-        click.echo(f'Error: {error.code}, {error.message}')
+        click.echo(f"Transfer API Error: {error.code}, {error.message}")
         return
+    except Exception as error:
+        click.echo(f"Unexpected Error: {error}")
+
+
+
     if endpoint["is_globus_connect"]:
         return endpoint["gcp_connected"]
     else:
@@ -245,7 +248,6 @@ def get_permissions(globus_eid, path):
     return output
 
 
-# probably would be nice to inherit a context here! but not really necessary
 @test.command()
 @click.argument('ep_name')
 def compute(ep_name):
@@ -257,8 +259,10 @@ def compute(ep_name):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
     funcx_eid = config["funcx_eid"]
+    func_uuid = HELLO_WORLD_UUID
+    expected = HELLO_WORLD_EXPECTED
 
-    click.echo({"funcx_online": compute_fn(funcx_eid)[0]})
+    click.echo({"funcx_online":compute_fn(funcx_eid, func_uuid, func_uuid)[0]})
 
 
 @test.command()
@@ -272,7 +276,7 @@ def data(ep_name):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
     globus_eid = config["globus_eid"]
-    stage_dir = config["local_download"] #TODO: make sure this is right with Tyler
+    stage_dir = config["local_download"]
     mdata_dir = config["mdata_write_dir"]
 
     res = {
@@ -307,11 +311,13 @@ def all(ep_name):
     config = json.loads(f.read())
 
     funcx_eid = config["funcx_eid"]
+    func_uuid = HELLO_WORLD_UUID
+    expected = HELLO_WORLD_EXPECTED
     globus_eid = config["globus_eid"]
     stage_dir = config["local_download"]
     mdata_dir = config["mdata_write_dir"]
 
-    res = {"funcx_online":compute_fn(funcx_eid)[0],
+    res = {"funcx_online":compute_fn(funcx_eid, func_uuid, expected)[0],
         "globus_online":data_fn(globus_eid),
         "stage_dir":check_read_fn(stage_dir, funcx_eid),
         "mdata_dir":check_write_fn(mdata_dir, funcx_eid)}
@@ -356,8 +362,8 @@ def containers(ep_name, alls, materials, general, tika):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
 
-    # Hello World Function UUID
-    func_uuid = "4b0b16ad-5570-4917-a531-9e8d73dbde56"
+    func_uuid = HELLO_WORLD_UUID
+    expected = HELLO_WORLD_EXPECTED
     required = ["globus_eid", "funcx_eid", "local_download", "mdata_write_dir"]
     for key in required:
         if key not in config:
@@ -367,19 +373,18 @@ def containers(ep_name, alls, materials, general, tika):
     click.echo("Testing Xtract configuration.")
 
     status = {
-        "funcx_online":compute_fn(config["funcx_eid"])[0],
+        "funcx_online":compute_fn(config["funcx_eid"], func_uuid, expected)[0],
         "globus_online":data_fn(config["globus_eid"]),
         "stage_dir":check_read_fn(config["local_download"], config["funcx_eid"]),
         "mdata_dir":check_write_fn(config["local_download"], config["funcx_eid"])}
     for key, value in status.items():
         if not value:
-            click.echo(f"Faulty set up detected. Please run `xtract is-online {ep_name}` to diagnose.")
+            click.echo(f"Faulty set up detected. Please run `xtract all {ep_name}` to diagnose.")
             return
 
     click.echo("Configuration is valid. Proceeding with Transfer.")
 
-    # Containers Endpoint ID
-    source_endpoint_id = '4f99675c-ac1f-11ea-bee8-0e716405a293'
+    source_endpoint_id = PETREL_XTRACT_EID
     destination_endpoint_id = config["globus_eid"]
 
     tdata = TransferData(tc, source_endpoint_id,
@@ -409,8 +414,6 @@ def containers(ep_name, alls, materials, general, tika):
     task_id = response["task_id"]
     task = tc.get_task(task_id)
 
-    # Edge case --  just got the new task but it already exists and is complete.
-    # Could happen for very small tasks.
     if task["completion_time"]:
         click.echo("Task complete.")
         transferred = task["bytes_transferred"]
