@@ -8,6 +8,10 @@ https://stackoverflow.com/questions/55189511/with-psycopg2-how-to-avoid-using-th
 
 class Xtract_Db:
     def __init__(self):
+        """
+        should probably have something here that maintains
+        the actual query that we are going to run
+        """
         self._db_pass = os.getenv("xtractdb_pass")
         self._db_conn = psycopg2.connect(f"dbname='xtractdb' user='xtract' host='xtractdb.c80kmwegdwta.us-east-1.rds.amazonaws.com' password='{self._db_pass}'")
 

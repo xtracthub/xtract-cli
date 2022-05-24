@@ -1,9 +1,8 @@
 import json
-import os, pathlib
+import os, sys, pathlib
 import click
 import psycopg2, psycopg2.errorcodes
 
-from fileinput import filename
 from time import sleep
 
 import mdf_toolbox
@@ -11,75 +10,14 @@ from funcx.sdk.client import FuncXClient
 from globus_sdk import TransferAPIError, TransferData
 from xtract_cli.external.xtract_service import config_containers
 
+import xtract_cli.external.progress as prog
+import xtract_cli.external.xtract_uuid as uuid
+import xtract_cli.external.xtract_db as db
+
 # DEBUG
 DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
-
-# UUID
-HELLO_WORLD_UUID = "91e5a8db-e7b3-4d28-a3ea-81f44d1d75bf"
-HELLO_WORLD_EXPECTED = "Hello World!"
-CHECK_READ_UUID = "80b17dc9-e0bd-439c-9bd4-741a1b6839f0"
-CHECK_WRITE_UUID = "18e44258-1356-4f35-9713-aa3de2b2abaa"
-CHECK_EXEC_UUID = "22513088-840a-426e-83f4-fd4a70c7199c"
-PETREL_XTRACT_EID = "4f99675c-ac1f-11ea-bee8-0e716405a293"
-CONTAINER_STORE_EID = "939cc587-f18d-4209-8676-3173bb7b9321"
-
-def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
-    fxc_task = fxc.get_task(funcx_response)
-    time_elapsed = 0
-    click.echo(f"'{name}' pending...", nl=False)
-    while time_elapsed < timeout:
-        if fxc_task['pending'] is True:
-            sleep(increment)
-            click.echo(f"." * increment, nl=False)
-            time_elapsed += increment
-            fxc_task = fxc.get_task(funcx_response)
-        else:
-            click.echo(" complete.")
-            return True
-    click.echo(f" '{name}' timed out after {time_elapsed} seconds.")
-    return False
-
-def user_loading_screen(tdata):
-    response = tc.submit_transfer(tdata)
-    task_id = response["task_id"]
-    task = tc.get_task(task_id)
-    if task["completion_time"]:
-        click.echo("Task complete.")
-        transferred = task["bytes_transferred"]
-        rate = task["effective_bytes_per_second"]
-        click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
-        return
-    increment = 1
-    click.echo("Task pending...", nl=False)
-    while task["files"] == 0:
-        sleep(increment)
-        click.echo(f"." * increment, nl=False)
-        task = tc.get_task(task_id)
-    total = task["files"]
-    succeeded = task["files_transferred"]
-    click.echo()
-    click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
-    while not task["completion_time"]:
-        if succeeded < task["files_transferred"]:
-            total = task["files"]
-            succeeded = task["files_transferred"]
-            click.echo()
-            click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
-        sleep(increment)
-        click.echo(f"." * increment, nl=False)
-        task = tc.get_task(task_id)
-        total = task["files"]
-        succeeded = task["files_transferred"]
-    click.echo(" transfer complete.")
-    if task["status"] != "SUCCEEDED":
-        click.echo("Task failed.")
-        return False
-    transferred = task["bytes_transferred"]
-    rate = task["effective_bytes_per_second"]
-    click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
-    return
 
 def db_insert_entry(file_name, dest_globus_eid, file_path, source_globus_eid, source_ep_name):
     sql = """INSERT INTO container_to_endpoint(container_name, globus_eid, path, source_eid, source_name) VALUES (%s, %s, %s, %s, %s);"""
@@ -184,7 +122,7 @@ def test():
     pass
 
 
-def compute_fn(funcx_eid, func_uuid, expected, timeout=10, increment=1):
+def compute_fn(funcx_eid, func_uuid, expected, timeout=10, increment=0.25):
     """Test whether a Funcx endpoint with Endpoint ID `funcx_eid` is online.
 
     Args:
@@ -198,7 +136,7 @@ def compute_fn(funcx_eid, func_uuid, expected, timeout=10, increment=1):
     fxc = FuncXClient()
     funcx_response = fxc.run(endpoint_id=funcx_eid, function_id=func_uuid)
 
-    if not wait_for_fxc_ep(fxc, funcx_response, "test compute", timeout, increment):
+    if not prog.wait_for_fxc_ep(fxc, funcx_response, "test compute", timeout, increment):
         return (False, f'Funcx timed out after {timeout} seconds')
     fxc_result = fxc.get_result(funcx_response)
     if fxc_result is not None and fxc_result == expected:
@@ -223,8 +161,7 @@ def data_fn(globus_eid):
         return
     except Exception as error:
         click.echo(f"Unexpected Error: {error}")
-
-
+        return
 
     if endpoint["is_globus_connect"]:
         return endpoint["gcp_connected"]
@@ -232,7 +169,7 @@ def data_fn(globus_eid):
         return endpoint["DATA"][0]["is_connected"]
 
 
-def check_read_fn(path, funcx_eid):
+def check_read_fn(path, funcx_eid, timeout=10, increment=0.25):
     """Check read permissions at `path` on a Funcx endpoint.
 
     Args:
@@ -245,14 +182,12 @@ def check_read_fn(path, funcx_eid):
     """
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="80b17dc9-e0bd-439c-9bd4-741a1b6839f0")
-    timeout=10
-    increment=1
-    if not wait_for_fxc_ep(fxc, funcx_response, "check read permissions", timeout, increment):
+    if not prog.wait_for_fxc_ep(fxc, funcx_response, "check read permissions", timeout, increment):
         return (False, f'Error: Funcx timed out after {timeout} seconds')
     return fxc.get_result(funcx_response)
 
 
-def check_write_fn(path, funcx_eid):
+def check_write_fn(path, funcx_eid, timeout=10, increment=0.25):
     """Check write permissions at `path` on a Funcx endpoint.
 
     Args:
@@ -265,11 +200,7 @@ def check_write_fn(path, funcx_eid):
     """
     fxc = FuncXClient()
     funcx_response = fxc.run(path, endpoint_id=funcx_eid, function_id="18e44258-1356-4f35-9713-aa3de2b2abaa")
-
-    timeout=10
-    increment=1
-
-    if not wait_for_fxc_ep(fxc, funcx_response, "check write permissions", timeout, increment):
+    if not prog.wait_for_fxc_ep(fxc, funcx_response, "check write permissions", timeout, increment):
         return (False, f'Error: Funcx timed out after {timeout} seconds')
     return fxc.get_result(funcx_response)
 
@@ -332,8 +263,8 @@ def compute(ep_name):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
     funcx_eid = config["funcx_eid"]
-    func_uuid = HELLO_WORLD_UUID
-    expected = HELLO_WORLD_EXPECTED
+    func_uuid = uuid.HELLO_WORLD_UUID
+    expected = uuid.uuid.HELLO_WORLD_EXPECTED
 
     click.echo({"funcx_online":compute_fn(funcx_eid, func_uuid, func_uuid)[0]})
 
@@ -384,8 +315,8 @@ def all(ep_name):
     config = json.loads(f.read())
 
     funcx_eid = config["funcx_eid"]
-    func_uuid = HELLO_WORLD_UUID
-    expected = HELLO_WORLD_EXPECTED
+    func_uuid = uuid.HELLO_WORLD_UUID
+    expected = uuid.HELLO_WORLD_EXPECTED
     globus_eid = config["globus_eid"]
     stage_dir = config["local_download"]
     mdata_dir = config["mdata_write_dir"]
@@ -435,8 +366,8 @@ def containers(ep_name, alls, materials, general, tika):
     f = open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json"))
     config = json.loads(f.read())
 
-    func_uuid = HELLO_WORLD_UUID
-    expected = HELLO_WORLD_EXPECTED
+    func_uuid = uuid.HELLO_WORLD_UUID
+    expected = uuid.HELLO_WORLD_EXPECTED
     required = ["globus_eid", "funcx_eid", "local_download", "mdata_write_dir"]
     for key in required:
         if key not in config:
@@ -457,7 +388,7 @@ def containers(ep_name, alls, materials, general, tika):
 
     click.echo("Configuration is valid. Proceeding with Transfer.")
 
-    source_endpoint_id = PETREL_XTRACT_EID
+    source_endpoint_id = uuid.PETREL_XTRACT_EID
     destination_endpoint_id = config["globus_eid"]
 
     tdata = TransferData(tc, source_endpoint_id,
@@ -477,10 +408,10 @@ def containers(ep_name, alls, materials, general, tika):
     if alls: chosen_list = all_list
     if tika: chosen_list = tika_list
 
-    for filename in chosen_list:
-        source = f"/XtractContainerLibrary/{filename}"
+    for file_name in chosen_list:
+        source = f"/XtractContainerLibrary/{file_name}"
         os.makedirs(os.path.dirname(os.path.expanduser(f"~/.xtract/.containers/")), exist_ok=True)
-        destination = os.path.expanduser(f"~/.xtract/.containers/{filename}")
+        destination = os.path.expanduser(f"~/.xtract/.containers/{file_name}")
         tdata.add_item(source, destination, recursive=False)
 
     response = tc.submit_transfer(tdata)
@@ -541,15 +472,21 @@ def transfer():
 def upload(ep_name, file_path):
     file_name = (file_path.split("/")[-1]).split(".")[0]
 
-    """ os.getcwd() is actually the location of the setup.py script, which
-    tells the interpreter where the program actually starts. """
     with open(os.path.join(os.getcwd(), "xtract_cli/endpoint_config/eagle_container.json")) as f:
         dest = json.loads(f.read())
     with open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")) as f:
-        source = json.loads(f.read())
+        src = json.loads(f.read())
 
     # check for liveness
-    _ = {"globus_online":data_fn(dest["globus_eid"])}
+    src_stat = {"globus_online":data_fn(dest["globus_eid"])}
+
+    src_stat = {
+        "funcx_online":compute_fn(src["funcx_eid"], uuid.HELLO_WORLD_UUID, uuid.HELLO_WORLD_EXPECTED)[0],
+        # "globus_online":data_fn(src["globus_eid"]),
+        # "stage_dir":check_read_fn(src["local_download"], src["funcx_eid"]),
+        # "mdata_dir":check_write_fn(src["local_download"], src["funcx_eid"])
+    }
+    # exit()
 
     funcx_scope = "https://auth.globus.org/scopes/facd7ccc-c5f4-42aa-916b-a0e270e2c2a9/all"
     fx_headers = {'Authorization': auths[funcx_scope].access_token,
@@ -557,31 +494,28 @@ def upload(ep_name, file_path):
                 'Openid': auths['openid'].access_token}
 
     payload = {
-            "ep_name": source["ep_name"],
-            "fx_eid": source["funcx_eid"],
-            "globus_eid": source["globus_eid"],
+            "ep_name": src["ep_name"],
+            "fx_eid": src["funcx_eid"],
+            "globus_eid": src["globus_eid"],
             "container_path": os.path.dirname(file_path),
             "headers": fx_headers,
             }
 
-    import pprint
-    pprint.pp(payload)
-
     config_res = config_containers(payload)
-    db_res = db_insert_entry(file_name, dest["globus_eid"], file_path, source["globus_eid"], source["ep_name"])
+    db_res = db_insert_entry(file_name, dest["globus_eid"], file_path, src["globus_eid"], src["ep_name"])
     if not db_res:
         exit()
     
     source_fp = file_path
-    dest_fp = f"/containers/{filename}.img"
-    tdata = TransferData(tc, source["globus_eid"], dest["globus_eid"], label="SDK example", sync_level="checksum")
+    dest_fp = f"/containers/{file_name}.img"
+    tdata = TransferData(tc, src["globus_eid"], dest["globus_eid"], label="SDK example", sync_level="checksum")
     tdata.add_item(source_fp, dest_fp)
-    user_loading_screen(tdata)
+    prog.user_loading_screen(tc, tdata)
     return True
 
 @transfer.command()
 def get_images():
-    with open(os.path.join(os.getcwd(), "endpoint_config/eagle_container.json")) as f:
+    with open(os.path.join(os.getcwd(), "xtract_cli/endpoint_config/eagle_container.json")) as f:
         dest = json.loads(f.read())
     _ = {"globus_online":data_fn(dest["globus_eid"])}
     res = db_get_entry()
@@ -602,7 +536,7 @@ def download(ep_name, image_name):
 
     source = f"/containers/{image_name}.img"
     os.makedirs(os.path.dirname(os.path.expanduser(f"~/.xtract/.containers/")), exist_ok=True)
-    dest = os.path.expanduser(f"~/.xtract/.containers/{filename}")
+    dest = os.path.expanduser(f"~/.xtract/.containers/{image_name}")
     tdata.add_item(source, dest, recursive=False)
 
     response = tc.submit_transfer(tdata)
@@ -615,5 +549,5 @@ def download(ep_name, image_name):
         click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
         return
 
-    user_loading_screen(tdata)
+    prog.user_loading_screen(tc, tdata)
     return True
