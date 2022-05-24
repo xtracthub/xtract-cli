@@ -1,18 +1,20 @@
-from fileinput import filename
-import os, sys, pathlib, json, click, mdf_toolbox 
-from funcx.sdk.client import (FuncXClient) 
-from globus_sdk import (TransferAPIError, TransferData) 
-from time import sleep 
-import psycopg2
+import json
+import os, pathlib
+import click
+import psycopg2, psycopg2.errorcodes
 
-from psycopg2.errorcodes import UNIQUE_VIOLATION
-from psycopg2 import errors
+from fileinput import filename
+from time import sleep
+
+import mdf_toolbox
+from funcx.sdk.client import FuncXClient
+from globus_sdk import TransferAPIError, TransferData
+from xtract_cli.external.xtract_service import config_containers
 
 # DEBUG
 DEBUG = False
 APP_NAME = "Xtract CLI"
 CLIENT_ID = "7561d66f-3bd3-496d-9a29-ed9d7757d1f2"
-
 
 # UUID
 HELLO_WORLD_UUID = "91e5a8db-e7b3-4d28-a3ea-81f44d1d75bf"
@@ -39,35 +41,102 @@ def wait_for_fxc_ep(fxc, funcx_response, name, timeout=60, increment=2):
     click.echo(f" '{name}' timed out after {time_elapsed} seconds.")
     return False
 
-def user_loading_screen():
-    pass
+def user_loading_screen(tdata):
+    response = tc.submit_transfer(tdata)
+    task_id = response["task_id"]
+    task = tc.get_task(task_id)
+    if task["completion_time"]:
+        click.echo("Task complete.")
+        transferred = task["bytes_transferred"]
+        rate = task["effective_bytes_per_second"]
+        click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
+        return
+    increment = 1
+    click.echo("Task pending...", nl=False)
+    while task["files"] == 0:
+        sleep(increment)
+        click.echo(f"." * increment, nl=False)
+        task = tc.get_task(task_id)
+    total = task["files"]
+    succeeded = task["files_transferred"]
+    click.echo()
+    click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
+    while not task["completion_time"]:
+        if succeeded < task["files_transferred"]:
+            total = task["files"]
+            succeeded = task["files_transferred"]
+            click.echo()
+            click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
+        sleep(increment)
+        click.echo(f"." * increment, nl=False)
+        task = tc.get_task(task_id)
+        total = task["files"]
+        succeeded = task["files_transferred"]
+    click.echo(" transfer complete.")
+    if task["status"] != "SUCCEEDED":
+        click.echo("Task failed.")
+        return False
+    transferred = task["bytes_transferred"]
+    rate = task["effective_bytes_per_second"]
+    click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
+    return
+
+def db_insert_entry(file_name, dest_globus_eid, file_path, source_globus_eid, source_ep_name):
+    sql = """INSERT INTO container_to_endpoint(container_name, globus_eid, path, source_eid, source_name) VALUES (%s, %s, %s, %s, %s);"""
+    db_pass = os.getenv("xtractdb_pass")
+    db_conn = psycopg2.connect(f"dbname='xtractdb' user='xtract' host='xtractdb.c80kmwegdwta.us-east-1.rds.amazonaws.com' password='{db_pass}'")
+    cur = db_conn.cursor()
+    try:
+        cur.execute(sql, (file_name, dest_globus_eid, file_path, source_globus_eid, source_ep_name))
+    except psycopg2.errors.lookup(psycopg2.errorcodes.UNIQUE_VIOLATION) as e:
+        print("Image already exists. Please provide a new image.")
+        return False
+    return True
+
+def db_get_entry():
+    sql = """SELECT container_name, path FROM container_to_endpoint;"""
+    db_pass = os.getenv("xtractdb_pass")
+    db_conn = psycopg2.connect(f"dbname='xtractdb' user='xtract' host='xtractdb.c80kmwegdwta.us-east-1.rds.amazonaws.com' password='{db_pass}'")
+    cur = db_conn.cursor()
+    cur.execute(sql)
+    res = cur.fetchall()
+    cur.close()
+    db_conn.close()
+    return res
+
+def authenticate():
+    # Acquire authentication via mdf_toolbox
+    click.echo("Authentication in progress...", nl=False)
+    auths = mdf_toolbox.login(
+        services=[
+            "openid",
+            "data_mdf",
+            "search",
+            "petrel",
+            "transfer",
+            "dlhub",
+            "https://auth.globus.org/scopes/facd7ccc-c5f4-42aa-916b-a0e270e2c2a9/all",
+        ],
+        app_name="Foundry",
+        make_clients=True,
+        no_browser=True,
+        no_local_server=False,
+    )
+    click.echo(" complete.")
+
+    # TODO: Create overarching context from CLI with funcx client initialization
+    # TODO: Separate functions into modules (inward facing, outward facing)
+    # print(auths['openid'].get_authorization_header())
+    # Acquire the Globus TransferClient
+    # print(auths)
+    # tc = auths['transfer']
+    # exit()
+    # return tc
+    return auths
 
 
-# Acquire authentication via mdf_toolbox
-click.echo("Authentication in progress...", nl=False)
-auths = mdf_toolbox.login(
-    services=[
-        "openid",
-        "data_mdf",
-        "search",
-        "petrel",
-        "transfer",
-        "dlhub",
-        "https://auth.globus.org/scopes/facd7ccc-c5f4-42aa-916b-a0e270e2c2a9/all",
-    ],
-    app_name="Foundry",
-    make_clients=True,
-    no_browser=True,
-    no_local_server=False,
-)
-click.echo(" complete.")
-
-# TODO: Create overarching context from CLI with funcx client initialization
-# TODO: Separate functions into modules (inward facing, outward facing)
-
-# Acquire the Globus TransferClient
-tc = auths['transfer']
-
+auths = authenticate()
+tc = auths["transfer"]
 
 @click.group()
 def cli():
@@ -479,29 +548,62 @@ def upload(ep_name, file_path):
     with open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")) as f:
         source = json.loads(f.read())
 
-    status = {
-        "globus_online":data_fn(dest["globus_eid"])
-    }
+    # check for liveness
+    _ = {"globus_online":data_fn(dest["globus_eid"])}
+
+    funcx_scope = "https://auth.globus.org/scopes/facd7ccc-c5f4-42aa-916b-a0e270e2c2a9/all"
+    fx_headers = {'Authorization': auths[funcx_scope].access_token,
+                'Search': auths['search'].authorizer.access_token,
+                'Openid': auths['openid'].access_token}
+
+    payload = {
+            "ep_name": source["ep_name"],
+            "fx_eid": source["funcx_eid"],
+            "globus_eid": source["globus_eid"],
+            "container_path": os.path.dirname(file_path),
+            "headers": fx_headers,
+            }
+
+    import pprint
+    pprint.pp(payload)
+
+    config_res = config_containers(payload)
+    db_res = db_insert_entry(file_name, dest["globus_eid"], file_path, source["globus_eid"], source["ep_name"])
+    if not db_res:
+        exit()
     
+    source_fp = file_path
+    dest_fp = f"/containers/{filename}.img"
     tdata = TransferData(tc, source["globus_eid"], dest["globus_eid"], label="SDK example", sync_level="checksum")
+    tdata.add_item(source_fp, dest_fp)
+    user_loading_screen(tdata)
+    return True
 
-    sql = """INSERT INTO container_to_endpoint(container_name, globus_eid, path, source_eid, source_name) VALUES (%s, %s, %s, %s, %s);"""
-    db_pass = os.getenv("xtractdb_pass")
-    db_conn = psycopg2.connect(f"dbname='xtractdb' user='xtract' host='xtractdb.c80kmwegdwta.us-east-1.rds.amazonaws.com' password='{db_pass}'")
-    cur = db_conn.cursor()
-    try:
-        cur.execute(sql, (file_name, dest["globus_eid"], file_path, source["globus_eid"], source["ep_name"]))
-    except errors.lookup(UNIQUE_VIOLATION) as e:
-        print("Image already exists. Please upload a new image.")
-        return False
+@transfer.command()
+def get_images():
+    with open(os.path.join(os.getcwd(), "endpoint_config/eagle_container.json")) as f:
+        dest = json.loads(f.read())
+    _ = {"globus_online":data_fn(dest["globus_eid"])}
+    res = db_get_entry()
+    print("Available Images:")
+    for idx, r in enumerate(res):
+        print("\t" + str(idx) + ", " + str(r[0]))
 
-    db_conn.commit()
-    cur.close()
-    db_conn.close()
+@transfer.command()
+@click.argument('ep_name')
+@click.argument('image_name')
+def download(ep_name, image_name):
+    with open(os.path.join(os.getcwd(), "xtract_cli/endpoint_config/eagle_container.json")) as f:
+        dest = json.loads(f.read())
+    with open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")) as f:
+        source = json.loads(f.read())
+    status = {"globus_online":data_fn(dest["globus_eid"])}
+    tdata = TransferData(tc, dest["globus_eid"], source["globus_eid"], label="SDK example", sync_level="checksum")
 
-    source = file_path
-    dest = f"/containers/{filename}.img"
-    tdata.add_item(source, dest)
+    source = f"/containers/{image_name}.img"
+    os.makedirs(os.path.dirname(os.path.expanduser(f"~/.xtract/.containers/")), exist_ok=True)
+    dest = os.path.expanduser(f"~/.xtract/.containers/{filename}")
+    tdata.add_item(source, dest, recursive=False)
 
     response = tc.submit_transfer(tdata)
     task_id = response["task_id"]
@@ -513,138 +615,5 @@ def upload(ep_name, file_path):
         click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
         return
 
-    increment = 1
-
-    click.echo("Task pending...", nl=False)
-    while task["files"] == 0:
-        sleep(increment)
-        click.echo(f"." * increment, nl=False)
-        task = tc.get_task(task_id)
-      
-    total = task["files"]
-    succeeded = task["files_transferred"]
-
-    click.echo()
-    click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
-    while not task["completion_time"]:
-        if succeeded < task["files_transferred"]:
-            total = task["files"]
-            succeeded = task["files_transferred"]
-            click.echo()
-            click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
-        sleep(increment)
-        click.echo(f"." * increment, nl=False)
-        task = tc.get_task(task_id)
-        # print(task)
-        total = task["files"]
-        succeeded = task["files_transferred"]
-    click.echo(" transfer complete.")
-
-    if task["status"] != "SUCCEEDED":
-        click.echo("Task failed.")
-        return False
-
-    transferred = task["bytes_transferred"]
-    rate = task["effective_bytes_per_second"]
-    click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
+    user_loading_screen(tdata)
     return True
-
-@transfer.command()
-def get_images():
-    with open(os.path.join(os.getcwd(), "xtract_cli/endpoint_config/eagle_container.json")) as f:
-        dest = json.loads(f.read())
-
-    status = {
-        "globus_online":data_fn(dest["globus_eid"])
-    }
-    
-    sql = """SELECT container_name, path FROM container_to_endpoint;"""
-    db_pass = os.getenv("xtractdb_pass")
-    db_conn = psycopg2.connect(f"dbname='xtractdb' user='xtract' host='xtractdb.c80kmwegdwta.us-east-1.rds.amazonaws.com' password='{db_pass}'")
-    cur = db_conn.cursor()
-    cur.execute(sql)
-    res = cur.fetchall()
-    cur.close()
-    db_conn.close()
-
-    print("Available Images:")
-    for idx, r in enumerate(res):
-        print(str(idx) + "\t" + str(r[0]))
-
-# @transfer.command()
-# @click.argument('ep_name')
-# @click.argument('file_path')
-# def download(ep_name, file_path):
-#     with open(os.path.join(os.getcwd(), "xtract_cli/endpoint_config/eagle_container.json")) as f:
-#         dest = json.loads(f.read())
-#     with open(os.path.expanduser(f"~/.xtract/{ep_name}/config.json")) as f:
-#         source = json.loads(f.read())
-
-#     status = {
-#         "globus_online":data_fn(dest["globus_eid"])
-#     }
-    
-#     tdata = TransferData(tc, source["globus_eid"], dest["globus_eid"], label="SDK example", sync_level="checksum")
-
-#     """
-#     Probably should refactor this into its own function. I really dislike how
-#     this is all just hanging out here.
-#     """
-#     sql = """SELECT container_name, path FROM container_to_endpoint;"""
-#     db_pass = os.getenv("xtractdb_pass")
-#     db_conn = psycopg2.connect(f"dbname='xtractdb' user='xtract' host='xtractdb.c80kmwegdwta.us-east-1.rds.amazonaws.com' password='{db_pass}'")
-#     cur = db_conn.cursor()
-#     cur.execute(sql)
-#     res = cur.fetchall()
-#     cur.close()
-#     db_conn.close()
-
-#     # source = file_path
-#     # dest = f"/containers/{filename}.img"
-#     # tdata.add_item(source, dest)
-
-#     # response = tc.submit_transfer(tdata)
-#     # task_id = response["task_id"]
-#     # task = tc.get_task(task_id)
-#     # if task["completion_time"]:
-#     #     click.echo("Task complete.")
-#     #     transferred = task["bytes_transferred"]
-#     #     rate = task["effective_bytes_per_second"]
-#     #     click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
-#     #     return
-
-#     # increment = 1
-
-#     # click.echo("Task pending...", nl=False)
-#     # while task["files"] == 0:
-#     #     sleep(increment)
-#     #     click.echo(f"." * increment, nl=False)
-#     #     task = tc.get_task(task_id)
-      
-#     # total = task["files"]
-#     # succeeded = task["files_transferred"]
-
-#     # click.echo()
-#     # click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
-#     # while not task["completion_time"]:
-#     #     if succeeded < task["files_transferred"]:
-#     #         total = task["files"]
-#     #         succeeded = task["files_transferred"]
-#     #         click.echo()
-#     #         click.echo(f"Transferred {succeeded} out of {total}...", nl=False)
-#     #     sleep(increment)
-#     #     click.echo(f"." * increment, nl=False)
-#     #     task = tc.get_task(task_id)
-#     #     # print(task)
-#     #     total = task["files"]
-#     #     succeeded = task["files_transferred"]
-#     # click.echo(" transfer complete.")
-
-#     # if task["status"] != "SUCCEEDED":
-#     #     click.echo("Task failed.")
-#     #     return False
-
-#     # transferred = task["bytes_transferred"]
-#     # rate = task["effective_bytes_per_second"]
-#     # click.echo(f"Transferred {transferred} bytes at {rate} bytes/second.")
-#     return True

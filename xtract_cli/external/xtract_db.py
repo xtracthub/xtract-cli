@@ -25,5 +25,3 @@ class Xtract_Db:
     def exit(self):
         self._db_conn.close()
 
-
-
